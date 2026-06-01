@@ -11,14 +11,14 @@ const groq = new Groq({
 router.post('/analyze', async (req, res) => {
   const { user_id = 1 } = req.body
   try {
-    const transactions = db.prepare(`
+    const transactions = await db.all(`
       SELECT category, SUM(amount) as total, COUNT(*) as count
       FROM transactions
       WHERE user_id = ? AND date >= date('now', '-30 days')
       GROUP BY category ORDER BY total DESC
-    `).all(user_id)
+    `, [user_id])
 
-    const user = db.prepare('SELECT name, level, exp, budget FROM users WHERE id = ?').get(user_id)
+    const user = await db.get('SELECT name, level, exp, budget FROM users WHERE id = ?', [user_id])
     const totalSpent = transactions.reduce((sum, t) => sum + t.total, 0)
     const budget = user?.budget || 2000000
     const sisaBudget = budget - totalSpent
@@ -68,11 +68,11 @@ Berikan analisis singkat dalam Bahasa Indonesia maksimal 150 kata, nada ramah se
 router.post('/quest-suggest', async (req, res) => {
   const { user_id = 1 } = req.body
   try {
-    const transactions = db.prepare(`
+    const transactions = await db.all(`
       SELECT category, SUM(amount) as total
       FROM transactions WHERE user_id = ?
       GROUP BY category ORDER BY total DESC LIMIT 3
-    `).all(user_id)
+    `, [user_id])
 
     const prompt = `
 Kamu adalah game designer untuk app keuangan gamifikasi bernama Finesse.
