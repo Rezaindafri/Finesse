@@ -1,1 +1,23 @@
-
+{
+  "name": "finesse",
+  "version": "1.0.0",
+  "description": "Gamified Budgeting & Financial Health Scorer",
+  "type": "module",
+  "scripts": {
+    "dev": "node server/index.js",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "better-sqlite3": "^9.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "groq-sdk": "^0.3.3"
+  },
+  "devDependencies": {
+    "vite": "^5.3.1"
+  }
+}
