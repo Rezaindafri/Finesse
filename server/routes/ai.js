@@ -4,9 +4,7 @@ import db from '../database.js'
 
 const router = Router()
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY
-})
+
 
 router.post('/analyze', async (req, res) => {
   const { user_id = 1 } = req.body
