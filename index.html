@@ -944,7 +944,7 @@ body {
     <div class="sidebar-user">
       <div class="avatar">B</div>
       <div class="sidebar-user-info">
-        <div class="sidebar-user-name">Budi Santoso</div>
+        <div class="sidebar-user-name" id="sidebar-name">Budi Santoso</div>
         <div class="sidebar-user-level">Level 7 · Liga Silver</div>
       </div>
     </div>
@@ -1045,6 +1045,14 @@ body {
 
         <!-- Right -->
         <div style="display:flex;flex-direction:column;gap:16px;">
+          <div class="card" style="background:linear-gradient(135deg,#4F46E5 0%,#7C3AED 100%);color:white;border:none;">
+            <div style="font-family:var(--font-display);font-size:14px;font-weight:700;margin-bottom:6px;">🤖 AI Financial Coach</div>
+            <div style="font-size:12px;opacity:0.85;margin-bottom:12px;">Analisis kebiasaan keuanganmu dengan Groq AI (Llama 3)</div>
+            <button id="btn-ai-analisis" onclick="getAIAnalysis()" style="width:100%;background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.3);color:white;padding:9px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+              <i class="ti ti-brain"></i> Analisis Keuanganku
+            </button>
+          </div>
+
           <div class="card">
             <div class="section-title"><i class="ti ti-shield" style="font-size:15px;"></i> Misi aktif</div>
             <div style="display:flex;flex-direction:column;gap:10px;" id="mini-quest-list">
@@ -1079,6 +1087,9 @@ body {
           <div style="font-size:11px;color:#6366F1;margin-top:2px;">Misi di bawah dirancang khusus oleh K-Means untuk membantumu hemat lebih efektif.</div>
         </div>
       </div>
+      <button id="btn-generate-quest" onclick="generateQuestAI()" style="width:100%;margin-bottom:16px;background:linear-gradient(135deg,#0D9488,#059669);color:white;border:none;padding:11px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+        <i class="ti ti-wand"></i> Generate Quest Baru dengan AI
+      </button>
       <div class="quest-list" id="quest-list-full">
         <!-- filled by JS -->
       </div>
@@ -1117,14 +1128,14 @@ body {
       <div class="profile-grid">
         <div style="display:flex;flex-direction:column;gap:16px;">
           <div class="card" style="text-align:center;">
-            <div class="avatar avatar-lg" style="margin:0 auto 12px;width:64px;height:64px;font-size:26px;">B</div>
-            <div style="font-family:var(--font-display);font-size:20px;font-weight:700;">Budi Santoso</div>
+            <div class="avatar avatar-lg" style="margin:0 auto 12px;width:64px;height:64px;font-size:26px;" id="profil-avatar">B</div>
+            <div style="font-family:var(--font-display);font-size:20px;font-weight:700;" id="profil-nama">Budi Santoso</div>
             <div style="font-size:12px;color:var(--gray-400);margin-top:4px;">budi@email.com</div>
             <div style="display:flex;justify-content:center;gap:8px;margin:12px 0;">
               <span class="tier-badge tier-silver"><i class="ti ti-medal"></i> Silver</span>
               <span class="chip chip-brand">Level 7</span>
             </div>
-            <button class="btn btn-outline btn-block" style="font-size:12px;"><i class="ti ti-edit"></i> Edit Profil</button>
+            <button class="btn btn-outline btn-block" style="font-size:12px;" onclick="openEditProfil()"><i class="ti ti-edit"></i> Edit Profil</button>
           </div>
           <div class="card">
             <div class="section-title">Statistik</div>
@@ -1163,7 +1174,7 @@ body {
             <div class="section-title"><i class="ti ti-settings" style="font-size:15px;"></i> Pengaturan</div>
             <div style="display:flex;flex-direction:column;gap:4px;">
               <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--gray-100);font-size:13px;">
-                <span>Budget bulanan</span><span style="font-weight:600;color:var(--brand);">Rp 2.000.000</span>
+                <span>Budget bulanan</span><span style="font-weight:600;color:var(--brand);" id="profil-budget">Rp 2.000.000</span>
               </div>
               <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--gray-100);font-size:13px;">
                 <span>Notifikasi</span><span style="font-size:11px;background:var(--teal-light);color:var(--teal);padding:2px 8px;border-radius:10px;font-weight:500;">Aktif</span>
@@ -1529,8 +1540,12 @@ function simpanTransaksi() {
   const exp = Math.max(5, Math.min(30, Math.round(15 - (nom / totalBudget) * 10)));
   const isOver = sisa < 0;
 
+  const tanggal = document.getElementById('tx-tanggal').value;
   txData.unshift({ nama: cat, kat, amt: nom, date: 'Baru saja', icon: 'ti-plus', iconBg: '#EEF2FF' });
   if (txData.length > 6) txData.pop();
+
+  // Simpan ke backend Railway
+  simpanTransaksiBackend(nom, kat, cat, tanggal);
 
   setTimeout(() => {
     if (isOver) {
@@ -1598,6 +1613,179 @@ function closeExpPopup() {
   document.getElementById('exp-popup').classList.remove('show');
 }
 
+// ── BACKEND API ──
+const API_URL = 'https://finesse-production.up.railway.app/api';
+
+async function apiPost(endpoint, data) {
+  try {
+    const res = await fetch(API_URL + endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  } catch (err) {
+    console.warn('API error:', err);
+    return null;
+  }
+}
+
+async function apiGet(endpoint) {
+  try {
+    const res = await fetch(API_URL + endpoint);
+    return await res.json();
+  } catch (err) {
+    console.warn('API error:', err);
+    return null;
+  }
+}
+
+async function apiPatch(endpoint, data) {
+  try {
+    const res = await fetch(API_URL + endpoint, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    });
+    return await res.json();
+  } catch (err) {
+    console.warn('API error:', err);
+    return null;
+  }
+}
+
+// ── AI ANALISIS ──
+async function getAIAnalysis() {
+  const btn = document.getElementById('btn-ai-analisis');
+  const resultBox = document.getElementById('ai-result-box');
+  const resultText = document.getElementById('ai-result-text');
+  const summaryBox = document.getElementById('ai-summary-box');
+
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader" style="animation:spin 1s linear infinite;"></i> Menganalisis...';
+  resultBox.style.display = 'none';
+
+  openModal('modal-ai');
+
+  const result = await apiPost('/ai/analyze', { user_id: 1 });
+
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-brain"></i> Analisis AI';
+
+  if (result && result.success) {
+    resultText.textContent = result.data.analysis;
+    const s = result.data.summary;
+    summaryBox.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;">
+        <div style="background:var(--gray-50);padding:10px;border-radius:8px;text-align:center;">
+          <div style="font-size:11px;color:var(--gray-400);">Terpakai</div>
+          <div style="font-weight:700;color:var(--red);">${s.persen_terpakai}%</div>
+        </div>
+        <div style="background:var(--gray-50);padding:10px;border-radius:8px;text-align:center;">
+          <div style="font-size:11px;color:var(--gray-400);">Sisa Budget</div>
+          <div style="font-weight:700;color:var(--teal);">Rp ${s.sisa_budget?.toLocaleString('id-ID') || '-'}</div>
+        </div>
+        <div style="background:var(--gray-50);padding:10px;border-radius:8px;text-align:center;">
+          <div style="font-size:11px;color:var(--gray-400);">Pengeluaran Terbesar</div>
+          <div style="font-weight:700;font-size:12px;">${s.top_category || '-'}</div>
+        </div>
+        <div style="background:var(--gray-50);padding:10px;border-radius:8px;text-align:center;">
+          <div style="font-size:11px;color:var(--gray-400);">Total Dipakai</div>
+          <div style="font-weight:700;color:var(--amber);">Rp ${s.total_spent?.toLocaleString('id-ID') || '-'}</div>
+        </div>
+      </div>
+    `;
+    document.getElementById('ai-loading-box').style.display = 'none';
+    resultBox.style.display = 'block';
+  } else {
+    resultText.textContent = 'AI sedang tidak tersedia. Coba lagi nanti.';
+    summaryBox.innerHTML = '';
+    document.getElementById('ai-loading-box').style.display = 'none';
+    resultBox.style.display = 'block';
+  }
+}
+
+// ── AI GENERATE QUEST ──
+async function generateQuestAI() {
+  const btn = document.getElementById('btn-generate-quest');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="ti ti-loader" style="animation:spin 1s linear infinite;"></i> Generating...';
+
+  const result = await apiPost('/ai/quest-suggest', { user_id: 1 });
+
+  btn.disabled = false;
+  btn.innerHTML = '<i class="ti ti-wand"></i> Generate Quest AI';
+
+  if (result && result.success && result.data.length > 0) {
+    result.data.forEach(q => {
+      questData.push({
+        id: questData.length + 1,
+        title: q.title,
+        kat: 'AI',
+        alasan: q.reason || 'Quest yang dibuat oleh AI berdasarkan kebiasaan keuanganmu.',
+        desc: q.description || q.title,
+        progress: 0,
+        total: q.total || 7,
+        exp: q.exp_reward || 200,
+        status: 'active'
+      });
+    });
+    renderQuestFull();
+    renderMiniQuest();
+    showToast('success', '🤖 Quest baru dari AI!', `${result.data.length} quest baru berhasil dibuat!`);
+  } else {
+    showToast('warn', '⚠️ AI tidak tersedia', 'Coba lagi nanti.');
+  }
+}
+
+// ── EDIT PROFIL ──
+function openEditProfil() {
+  document.getElementById('edit-nama').value = document.getElementById('profil-nama').textContent;
+  const budgetText = document.getElementById('profil-budget').textContent;
+  document.getElementById('edit-budget').value = budgetText.replace(/\D/g, '');
+  openModal('modal-edit-profil');
+}
+
+async function simpanProfil() {
+  const nama = document.getElementById('edit-nama').value.trim();
+  const budget = parseInt(document.getElementById('edit-budget').value.replace(/\D/g, ''));
+
+  if (!nama) { showToast('warn', '⚠️ Nama tidak boleh kosong', ''); return; }
+  if (!budget || budget < 100000) { showToast('warn', '⚠️ Budget minimal Rp 100.000', ''); return; }
+
+  // Update tampilan
+  document.getElementById('profil-nama').textContent = nama;
+  document.getElementById('profil-avatar').textContent = nama.charAt(0).toUpperCase();
+  document.getElementById('profil-budget').textContent = 'Rp ' + budget.toLocaleString('id-ID');
+  document.getElementById('sidebar-name').textContent = nama;
+  totalBudget = budget;
+  updateBudgetDisplay();
+
+  // Simpan ke backend
+  const result = await apiPatch('/users/1', { name: nama, budget });
+  closeModal('modal-edit-profil');
+
+  if (result && result.success) {
+    showToast('success', '✅ Profil diperbarui!', 'Data tersimpan ke database.');
+  } else {
+    showToast('success', '✅ Profil diperbarui!', 'Data tersimpan lokal.');
+  }
+}
+
+// ── SIMPAN TRANSAKSI KE BACKEND ──
+async function simpanTransaksiBackend(nom, kat, cat, tanggal) {
+  const result = await apiPost('/transactions', {
+    user_id: 1,
+    amount: nom,
+    category: kat,
+    note: cat,
+    date: tanggal
+  });
+  if (result && result.success) {
+    console.log('✅ Transaksi tersimpan ke DB, EXP:', result.data.exp_earned);
+  }
+}
+
 // ── INIT ──
 window.addEventListener('load', () => {
   const today = new Date().toISOString().split('T')[0];
@@ -1606,5 +1794,47 @@ window.addEventListener('load', () => {
   renderAll();
 });
 </script>
+<!-- Modal: AI Analisis -->
+<div id="modal-ai" class="modal-overlay">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header">
+      <div class="modal-title">🤖 AI Financial Analysis</div>
+      <button class="modal-close" onclick="closeModal('modal-ai')"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="ai-result-box" style="display:none;">
+      <div style="background:linear-gradient(135deg,#EEF2FF,#F5F3FF);border-radius:10px;padding:14px;margin-bottom:12px;border-left:3px solid var(--brand);">
+        <div style="font-size:11px;font-weight:600;color:var(--brand);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;">Analisis dari Groq AI (Llama 3)</div>
+        <div id="ai-result-text" style="font-size:13px;line-height:1.7;color:var(--gray-700);"></div>
+      </div>
+      <div id="ai-summary-box"></div>
+    </div>
+    <div id="ai-loading-box" style="text-align:center;padding:24px;">
+      <div style="font-size:32px;margin-bottom:8px;">🤖</div>
+      <div style="font-size:13px;color:var(--gray-500);">Sedang menganalisis data keuanganmu...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Edit Profil -->
+<div id="modal-edit-profil" class="modal-overlay">
+  <div class="modal" style="max-width:400px;">
+    <div class="modal-header">
+      <div class="modal-title">✏️ Edit Profil</div>
+      <button class="modal-close" onclick="closeModal('modal-edit-profil')"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Nama</label>
+      <input class="form-input" type="text" id="edit-nama" placeholder="Nama lengkap"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Budget Bulanan (Rp)</label>
+      <input class="form-input" type="number" id="edit-budget" placeholder="2000000"/>
+    </div>
+    <button class="btn btn-primary btn-block" style="padding:12px;" onclick="simpanProfil()">
+      <i class="ti ti-check"></i> Simpan Perubahan
+    </button>
+  </div>
+</div>
+
 </body>
 </html>
