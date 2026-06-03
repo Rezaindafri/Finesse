@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  base: '/Finesse/finesse-frontend/',
   root: '.',
   build: {
     outDir: 'dist',
