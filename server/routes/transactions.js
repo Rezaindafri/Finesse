@@ -12,25 +12,31 @@ async function hitungLevel(xp) {
   return level || { level: 1, title: 'Pemula', badge: '🥉' }
 }
 
-// ── HELPER: Panggil ML API untuk prediksi XP ──
-async function predictXP(amount, category, cumulative_spend, jumlah_kategori) {
+// ── HELPER: Panggil Python FastAPI untuk prediksi XP ──
+// FastAPI harus berjalan di http://127.0.0.1:8000
+// Endpoint: POST /predict_exp
+// Body: { user_id, amount, category }
+// Response: { exp_awarded: <number> }
+async function predictXP(amount, category) {
+  const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000'
   try {
-    // KITA TEMBAK LANGSUNG KE PORT 8000 (Python FastAPI punyamu!)
-    const res = await fetch(`http://127.0.0.1:8000/predict_exp`, {
+    const res = await fetch(`${FASTAPI_URL}/predict_exp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-          user_id: 1, 
-          amount: amount, 
-          category: category 
+      body: JSON.stringify({
+        user_id: 1,
+        amount: amount,
+        category: category
       })
     })
+    if (!res.ok) throw new Error(`FastAPI responded with status ${res.status}`)
     const data = await res.json()
-    return data.exp_awarded || 10
+    return data.exp_awarded ?? 10
   } catch (err) {
-    // Fallback kalau ML tidak tersedia
-    const base = Math.max(5, Math.min(30, Math.round(20 - (amount / 100000) * 5)))
-    return base
+    // FastAPI belum aktif — kembalikan nilai default
+    // Ganti blok ini dengan throw err jika ingin strict (tidak mau fallback)
+    console.warn('[predictXP] FastAPI tidak tersedia, pakai default 10 XP:', err.message)
+    return 10
   }
 }
 
@@ -59,7 +65,7 @@ router.get('/:id', async (req, res) => {
   }
 })
 
-// POST /api/transactions — flow utama dengan ML
+// POST /api/transactions — flow utama dengan Python FastAPI
 router.post('/', async (req, res) => {
   const { user_id = 1, amount, category, note, date } = req.body
   if (!amount || !category || !date) {
@@ -87,8 +93,8 @@ router.post('/', async (req, res) => {
     )
     const jumlah_kategori = (katRow?.jumlah || 0) + 1
 
-    // 4. Request ke ML API untuk prediksi XP (2 request API sesuai requirement)
-    const xp_earned = await predictXP(amount, category, cumulative_spend, jumlah_kategori)
+    // 4. Request ke Python FastAPI untuk prediksi XP
+    const xp_earned = await predictXP(amount, category)
 
     // 5. Simpan transaksi ke database
     const txResult = await db.run(
@@ -153,7 +159,8 @@ router.delete('/:id', async (req, res) => {
     if (result.changes === 0) return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' })
     res.json({ success: true, message: 'Transaksi dihapus' })
   } catch (err) {
-    res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server', error: err.message });
+    res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server', error: err.message })
   }
-});
-export default router;
+})
+
+export default router

@@ -7,9 +7,7 @@ import { dirname, join } from 'path'
 import transactionsRouter from './routes/transactions.js'
 import questsRouter from './routes/quests.js'
 import usersRouter from './routes/users.js'
-import aiRouter from './routes/ai.js'
 import xpRouter from './routes/xp.js'
-import mlRouter from './routes/ml.js'
 
 const app = express()
 const PORT = process.env.PORT || 3000
@@ -24,9 +22,7 @@ app.use(express.static(join(__dirname, '../')))
 app.use('/api/transactions', transactionsRouter)
 app.use('/api/quests', questsRouter)
 app.use('/api/users', usersRouter)
-app.use('/api/ai', aiRouter)
 app.use('/api/xp', xpRouter)
-app.use('/api/ml', mlRouter)
 
 // ── HEALTH CHECK ──
 app.get('/api/health', (req, res) => {
@@ -42,11 +38,9 @@ app.get('/api/health', (req, res) => {
       'GET  /api/xp/history',
       'GET  /api/xp/summary',
       'GET  /api/xp/levels',
-      'POST /api/ml/predict-xp',
-      'GET  /api/ml/model-info',
-      'POST /api/ai/analyze',
-      'POST /api/ai/quest-suggest',
-      'GET  /api/users/leaderboard/monthly'
+      'GET  /api/users/leaderboard/monthly',
+      'POST /api/quests',
+      'POST /api/quests/:id/claim'
     ]
   })
 })
@@ -58,7 +52,7 @@ app.use('/api/*', (req, res) => {
 
 // ── Serve index.html ──
 app.get('*', (req, res) => {
-  res.sendFile(join(__dirname, '../index.html'))
+  res.sendFile(join(__dirname, '../page/index.html'))
 })
 
 // ── START ──
@@ -71,8 +65,8 @@ app.listen(PORT, () => {
 ║  /api/transactions  → CRUD + ML XP       ║
 ║  /api/xp/history    → Riwayat XP         ║
 ║  /api/xp/levels     → Level Config       ║
-║  /api/ml/predict-xp → Deep Learning      ║
-║  /api/ai/analyze    → Groq AI Coach      ║
+║  /api/users         → Profil & Leaderboard║
+║  /api/quests        → Quest Management   ║
 ╚══════════════════════════════════════════╝
   `)
 })

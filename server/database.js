@@ -20,7 +20,7 @@ const all = (sql, params = []) => new Promise((resolve, reject) => {
   db.all(sql, params, (err, rows) => { if (err) reject(err); else resolve(rows) })
 })
 
-// ── TABEL ──
+// ── TABEL USERS ──
 await run(`CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
@@ -29,9 +29,16 @@ await run(`CREATE TABLE IF NOT EXISTS users (
   level INTEGER DEFAULT 1,
   exp INTEGER DEFAULT 0,
   budget INTEGER DEFAULT 2000000,
+  quest_token_used INTEGER DEFAULT 0,
+  quest_token_date TEXT DEFAULT NULL,
   created_at TEXT DEFAULT (datetime('now'))
 )`)
 
+// Migrasi kolom baru kalau tabel users sudah ada tapi belum punya kolom token
+try { await run(`ALTER TABLE users ADD COLUMN quest_token_used INTEGER DEFAULT 0`) } catch {}
+try { await run(`ALTER TABLE users ADD COLUMN quest_token_date TEXT DEFAULT NULL`) } catch {}
+
+// ── TABEL TRANSACTIONS ──
 await run(`CREATE TABLE IF NOT EXISTS transactions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
@@ -44,6 +51,7 @@ await run(`CREATE TABLE IF NOT EXISTS transactions (
   created_at TEXT DEFAULT (datetime('now'))
 )`)
 
+// ── TABEL QUESTS (dengan kolom sistem misi baru) ──
 await run(`CREATE TABLE IF NOT EXISTS quests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
@@ -51,12 +59,29 @@ await run(`CREATE TABLE IF NOT EXISTS quests (
   description TEXT,
   reason TEXT,
   progress INTEGER DEFAULT 0,
-  total INTEGER NOT NULL,
+  total INTEGER NOT NULL DEFAULT 1,
   exp_reward INTEGER DEFAULT 100,
   status TEXT DEFAULT 'active',
+  quest_type TEXT DEFAULT 'hemat_total',
+  target_amount INTEGER DEFAULT NULL,
+  target_category TEXT DEFAULT NULL,
+  target_count INTEGER DEFAULT NULL,
+  deadline TEXT DEFAULT NULL,
+  difficulty TEXT DEFAULT 'medium',
+  start_date TEXT DEFAULT NULL,
   created_at TEXT DEFAULT (datetime('now'))
 )`)
 
+// Migrasi kolom baru ke tabel quests yang sudah ada
+try { await run(`ALTER TABLE quests ADD COLUMN quest_type TEXT DEFAULT 'hemat_total'`) } catch {}
+try { await run(`ALTER TABLE quests ADD COLUMN target_amount INTEGER DEFAULT NULL`) } catch {}
+try { await run(`ALTER TABLE quests ADD COLUMN target_category TEXT DEFAULT NULL`) } catch {}
+try { await run(`ALTER TABLE quests ADD COLUMN target_count INTEGER DEFAULT NULL`) } catch {}
+try { await run(`ALTER TABLE quests ADD COLUMN deadline TEXT DEFAULT NULL`) } catch {}
+try { await run(`ALTER TABLE quests ADD COLUMN difficulty TEXT DEFAULT 'medium'`) } catch {}
+try { await run(`ALTER TABLE quests ADD COLUMN start_date TEXT DEFAULT NULL`) } catch {}
+
+// ── TABEL LEADERBOARD ──
 await run(`CREATE TABLE IF NOT EXISTS leaderboard (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id INTEGER NOT NULL,
@@ -141,11 +166,6 @@ if (userCount.count === 0) {
   await run(`INSERT INTO leaderboard (user_id, name, exp, level, month) VALUES (?,?,?,?,?)`, [0, 'Siti Rahayu', 3800, 8, month])
   await run(`INSERT INTO leaderboard (user_id, name, exp, level, month) VALUES (?,?,?,?,?)`, [0, 'Dian Pratama', 3100, 8, month])
   await run(`INSERT INTO leaderboard (user_id, name, exp, level, month) VALUES (?,?,?,?,?)`, [0, 'Rizky Maulana', 2900, 7, month])
-
-  await run(`INSERT INTO quests (user_id, title, description, reason, progress, total, exp_reward, status) VALUES (?,?,?,?,?,?,?,?)`,
-    [1, 'Hemat 5 Hari Berturut', 'Catat pengeluaran di bawah Rp 50.000 selama 5 hari', 'Kebiasaan hemat membentuk disiplin finansial', 3, 5, 200, 'active'])
-  await run(`INSERT INTO quests (user_id, title, description, reason, progress, total, exp_reward, status) VALUES (?,?,?,?,?,?,?,?)`,
-    [1, 'Master Transportasi', 'Gunakan transportasi umum 10x bulan ini', 'Hemat sampai 60% dibanding kendaraan pribadi', 7, 10, 150, 'active'])
 
   console.log('✅ Database seeded dengan data demo')
 }
