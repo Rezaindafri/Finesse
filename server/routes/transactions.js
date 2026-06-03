@@ -15,15 +15,19 @@ async function hitungLevel(xp) {
 // ── HELPER: Panggil ML API untuk prediksi XP ──
 async function predictXP(amount, category, cumulative_spend, jumlah_kategori) {
   try {
-    const ML_API = process.env.ML_API_URL || 'https://finesse-production.up.railway.app/api/ml'
-    const res = await fetch(`${ML_API}/predict-xp`, {
+    // KITA TEMBAK LANGSUNG KE PORT 8000 (Python FastAPI punyamu!)
+    const res = await fetch(`http://127.0.0.1:8000/predict_exp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount, category, cumulative_spend, jumlah_kategori })
+      body: JSON.stringify({ 
+          user_id: 1, 
+          amount: amount, 
+          category: category 
+      })
     })
     const data = await res.json()
-    return data.xp || 10
-  } catch {
+    return data.exp_awarded || 10
+  } catch (err) {
     // Fallback kalau ML tidak tersedia
     const base = Math.max(5, Math.min(30, Math.round(20 - (amount / 100000) * 5)))
     return base
