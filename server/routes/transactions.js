@@ -149,4 +149,6 @@ router.delete('/:id', async (req, res) => {
     if (result.changes === 0) return res.status(404).json({ success: false, message: 'Transaksi tidak ditemukan' })
     res.json({ success: true, message: 'Transaksi dihapus' })
   } catch (err) {
-    re
+    res.status(500).json({ success: false, message: 'Terjadi kesalahan pada server', error: err.message });
+  }
+}); //
