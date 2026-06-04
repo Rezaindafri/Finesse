@@ -133,7 +133,9 @@ function startAdventure() {
   totalBudget = parseInt(raw) || 2000000
   currentUser.budget = totalBudget
   goTo('screen-app')
-  showToast('success', '🎉 Petualangan dimulai!', `Selamat datang di Finesse!`)
+  setTimeout(() => {
+    showToast('success', 'Petualangan dimulai!', `Selamat datang kembali Pejuang Financial!`)
+  }, 300)
 }
 
 // ── INIT APP (load semua data dari backend) ──
@@ -164,6 +166,8 @@ async function loadUser() {
     if (bgt) bgt.textContent = 'Rp ' + totalBudget.toLocaleString('id-ID')
     const sn = document.getElementById('sidebar-name')
     if (sn) sn.textContent = nama
+    const avatarLevelBadge = document.getElementById('avatar-level-badge')
+    if (avatarLevelBadge) avatarLevelBadge.textContent = currentUser.level || 1
 
     // Update EXP display
     const expEl = document.getElementById('profil-exp')
@@ -201,12 +205,109 @@ async function loadLeaderboard() {
 
 // ── RENDER ──
 function renderAll() {
+  renderAvatarStats()
   renderTxList()
   renderMiniQuest()
   renderMiniRank()
   renderQuestFull()
   renderRankFull()
   updateBudgetDisplay()
+}
+
+function getLastExpFromTx() {
+  if (!Array.isArray(txData) || txData.length === 0) return 0
+  const lastExpTx = txData.find(tx => tx.exp_earned && tx.exp_earned > 0)
+  return lastExpTx ? lastExpTx.exp_earned : 0
+}
+
+function getLeaguePercentRank() {
+  if (!rankData || !rankData.liga_user || !Array.isArray(rankData.leaderboard)) return null
+  const userLiga = rankData.leaderboard.find(l => l.liga_id === rankData.liga_user.id)
+  if (!userLiga || !userLiga.user_rank_di_liga || !userLiga.total_members) return null
+  const rank = userLiga.user_rank_di_liga
+  const total = userLiga.total_members
+  return Math.min(100, Math.max(1, Math.ceil((rank / total) * 100)))
+}
+
+function getAvatarPersona() {
+  const txCount = Array.isArray(txData) ? txData.length : 0
+  const totalSpent = txData.reduce((sum, tx) => sum + (tx.amount || 0), 0)
+  const avgTx = txCount ? totalSpent / txCount : 0
+  const categoryCounts = txData.reduce((acc, tx) => {
+    const cat = tx.category || 'Lainnya'
+    acc[cat] = (acc[cat] || 0) + 1
+    return acc
+  }, {})
+  const transportRatio = txCount ? (categoryCounts['Transportasi'] || 0) / txCount : 0
+  const hiburanRatio = txCount ? (categoryCounts['Hiburan & Nongkrong'] || 0) / txCount : 0
+  const isHemat = totalBudget > 0 && totalSpent <= totalBudget * 0.35 && txCount >= 3
+  const isBoros = totalBudget > 0 && totalSpent >= totalBudget * 0.8 && txCount >= 3
+  const isPemalas = txCount <= 2
+  const isSukaFoya = hiburanRatio >= 0.25 || avgTx >= 150000
+  const isSukaJalan = transportRatio >= 0.2 || (categoryCounts['Transportasi'] || 0) >= 2
+
+  if (isPemalas) {
+    return {
+      title: 'Pemalas Cuan',
+      subtitle: 'Sedikit gerak, tapi masih bisa mulai dari satu transaksi kecil setiap hari.'
+    }
+  }
+  if (isSukaFoya) {
+    return {
+      title: 'Si Foya-Foya',
+      subtitle: 'Gaya hidup seru, tapi jangan lupa tetap pantau budgetmu.'
+    }
+  }
+  if (isSukaJalan) {
+    return {
+      title: 'Si Jalan-Jalan',
+      subtitle: 'Transaksimu sering untuk perjalanan dan pengalaman baru.'
+    }
+  }
+  if (isBoros) {
+    return {
+      title: 'Si Boros',
+      subtitle: 'Waspada: pengeluaran hampir mendekati batas budgetmu.'
+    }
+  }
+  if (isHemat) {
+    return {
+      title: 'Si Hemat',
+      subtitle: 'Pengeluaranmu terkendali dan budget tetap aman.'
+    }
+  }
+  return {
+    title: 'Biasa Aja',
+    subtitle: 'Kelola pengeluaranmu sedikit lagi untuk jadi lebih rapih.'
+  }
+}
+
+function renderAvatarStats() {
+  const txCount = Array.isArray(txData) ? txData.length : 0
+  const lastExp = getLastExpFromTx()
+  const leaguePct = getLeaguePercentRank()
+  const persona = getAvatarPersona()
+
+  const titleEl = document.getElementById('avatar-title')
+  if (titleEl) titleEl.textContent = persona.title
+
+  const subtitleEl = document.getElementById('avatar-subtitle')
+  if (subtitleEl) subtitleEl.textContent = persona.subtitle
+
+  const lastExpEl = document.getElementById('avatar-last-exp')
+  if (lastExpEl) {
+    lastExpEl.textContent = lastExp > 0 ? `+${lastExp.toLocaleString('id-ID')} EXP terakhir` : 'Belum ada EXP terbaru'
+  }
+
+  const leaguePercentEl = document.getElementById('avatar-league-percent')
+  if (leaguePercentEl) {
+    leaguePercentEl.textContent = leaguePct ? `Top ${leaguePct}% Liga` : 'Persentase liga belum tersedia'
+  }
+
+  const txCountEl = document.getElementById('avatar-tx-count')
+  if (txCountEl) {
+    txCountEl.textContent = `${txCount.toLocaleString('id-ID')} Transaksi`
+  }
 }
 
 function updateBudgetDisplay() {
@@ -379,6 +480,14 @@ function syncLigaBadges() {
   if (dashBadge) {
     dashBadge.className = `tier-badge ${tierCls}`
     dashBadge.innerHTML = `<i class="ti ti-medal"></i> ${liga.label.replace('Liga ', '')}`
+  }
+
+  const dashboardRankText = document.getElementById('dashboard-rank-text')
+  const myLigaData = rankData.leaderboard?.find(l => l.liga_id === liga.id)
+  const myRank = myLigaData?.user_rank_di_liga || '?'
+  const totalInLiga = myLigaData?.total_members || myLigaData?.top10?.length || 0
+  if (dashboardRankText && user) {
+    dashboardRankText.textContent = totalInLiga ? `Peringkat #${myRank} dari ${totalInLiga}` : `Peringkat #${myRank}`
   }
 
   const dashboardExpLevel = document.getElementById('dashboard-exp-level')
@@ -804,6 +913,9 @@ async function simpanProfil() {
 
   if (!nama) { showToast('warn', '⚠️ Nama tidak boleh kosong', ''); return }
   if (!budget || budget < 100000) { showToast('warn', '⚠️ Budget minimal Rp 100.000', ''); return }
+
+  const confirmed = window.confirm('Apakah kamu yakin ingin mengubah profil?')
+  if (!confirmed) return
 
   // Update tampilan dulu
   document.getElementById('profil-nama').textContent = nama

@@ -165,7 +165,7 @@ router.get('/', async (req, res) => {
   const userId = req.query.user_id || 1
   try {
     const transactions = await db.all(
-      `SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 20`,
+      `SELECT * FROM transactions WHERE user_id = ? ORDER BY created_at DESC`,
       [userId]
     )
     res.json({ success: true, data: transactions })

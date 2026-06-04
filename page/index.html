@@ -135,7 +135,7 @@
             <div class="metric-val" style="font-size:20px;" id="dashboard-liga-name">Silver</div>
             <span class="tier-badge tier-silver" id="dashboard-liga-badge"><i class="ti ti-medal"></i> Tier 2</span>
           </div>
-          <div class="metric-sub">Peringkat #12 dari 100</div>
+          <div class="metric-sub" id="dashboard-rank-text">Peringkat #12 dari 100</div>
         </div>
       </div>
 
@@ -145,13 +145,14 @@
         <div style="display:flex;flex-direction:column;gap:16px;">
           <div class="card">
             <div class="avatar-section">
-              <div class="avatar-big">★<div class="avatar-level-badge">7</div></div>
+              <div class="avatar-big">★<div class="avatar-level-badge" id="avatar-level-badge">7</div></div>
               <div class="avatar-info">
-                <h3>Penabung Handal</h3>
-                <p>Kamu sudah mencatat 42 transaksi bulan ini</p>
+                <h3 id="avatar-title">Penabung Handal</h3>
+                <p id="avatar-subtitle">Ayo mulai mencatat transaksi agar Finesse semakin pintar.</p>
                 <div class="chips-row">
-                  <span class="chip chip-teal">+15 EXP terakhir</span>
-                  <span class="chip chip-brand">Top 15% Liga</span>
+                  <span class="chip chip-teal" id="avatar-last-exp">+0 EXP terakhir</span>
+                  <span class="chip chip-brand" id="avatar-league-percent">Top 0% Liga</span>
+                  <span class="chip chip-gray" id="avatar-tx-count">0 Transaksi</span>
                 </div>
               </div>
             </div>
@@ -417,6 +418,28 @@
     <button class="btn btn-teal btn-block" style="padding:12px;" onclick="simpanTransaksi()">
       <i class="ti ti-check"></i> Simpan Transaksi
     </button>
+  </div>
+</div>
+
+<!-- Modal: Edit Profil -->
+<div id="modal-edit-profil" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Edit Profil</div>
+      <button type="button" class="modal-close" onclick="closeModal('modal-edit-profil')" aria-label="Close modal"><i class="ti ti-x"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="edit-nama">Nama</label>
+      <input class="form-input" id="edit-nama" type="text" placeholder="Nama kamu" />
+    </div>
+    <div class="form-group">
+      <label class="form-label" for="edit-budget">Budget bulanan</label>
+      <input class="form-input" id="edit-budget" type="text" placeholder="2000000" oninput="formatBudget(this)" />
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px;">
+      <button class="btn btn-primary btn-block" style="flex:1;" onclick="simpanProfil()">Simpan</button>
+      <button class="btn btn-outline btn-block" style="flex:1;" onclick="closeModal('modal-edit-profil')">Batal</button>
+    </div>
   </div>
 </div>
 

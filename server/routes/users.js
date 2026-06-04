@@ -72,6 +72,7 @@ router.get('/leaderboard/liga', async (req, res) => {
         liga_color: liga.color,
         is_user_liga: userDiLigaIni,
         user_rank_di_liga: userRankDiLiga >= 0 ? userRankDiLiga + 1 : null,
+        total_members: pemainLiga.length,
         top10
       }
     })
