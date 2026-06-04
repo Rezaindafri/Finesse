@@ -40,7 +40,7 @@ body {
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
 }
-
+/*Hansief
 /* ─── SCREENS ─── */
 .screen { display: none; min-height: 100vh; }
 .screen.active { display: flex; flex-direction: column; }
@@ -453,6 +453,7 @@ body {
 .tier-silver { background: #F1F5F9; color: #475569; border: 1px solid #CBD5E1; }
 .tier-gold { background: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; }
 .tier-iron { background: var(--gray-100); color: var(--gray-500); border: 1px solid var(--gray-300); }
+.tier-bronze { background: #FEF3C7; color: #B45309; border: 1px solid #FCD34D; }
 .tier-diamond { background: #EFF6FF; color: #1D4ED8; border: 1px solid #BFDBFE; }
 
 /* ─── DASHBOARD ─── */
@@ -586,6 +587,66 @@ body {
 .rank-name { flex: 1; font-size: 13px; font-weight: 500; }
 .rank-exp { font-size: 12px; font-weight: 600; color: var(--teal); }
 .rank-badge { font-size: 10px; background: var(--brand-light); color: var(--brand); padding: 2px 7px; border-radius: 10px; }
+
+.other-liga-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.other-liga-card {
+  border-radius: var(--radius);
+  border: 1px solid var(--gray-200);
+  overflow: hidden;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  min-height: 192px;
+}
+.other-liga-header {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}
+.other-liga-icon { font-size: 18px; line-height: 1; }
+.other-liga-title { font-size: 13px; font-weight: 700; }
+.other-liga-body { padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.other-empty { font-size: 12px; color: var(--gray-300); text-align: center; padding: 12px 0; }
+.other-liga-row {
+  display: grid;
+  grid-template-columns: 20px 36px minmax(0, 1fr) 56px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--gray-100);
+}
+.other-liga-row.last { border-bottom: none; }
+.other-medal { font-size: 14px; text-align: center; }
+.other-avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.other-name {
+  font-size: 12px;
+  color: var(--gray-700);
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.other-exp {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--gray-500);
+  text-align: right;
+  min-width: 56px;
+}
+@media (max-width: 760px) {
+  .other-liga-row { grid-template-columns: 20px 36px minmax(0, 1fr) 50px; }
+}
+@media (max-width: 520px) {
+  .other-liga-row { grid-template-columns: 20px 36px 1fr; }
+  .other-exp { text-align: left; }
+}
 
 /* ─── PROFILE ─── */
 .profile-grid { display: grid; grid-template-columns: 280px 1fr; gap: 20px; }

@@ -52,13 +52,11 @@ async function apiPatch(endpoint, data) {
 
 // ── ICON & WARNA PER KATEGORI ──
 const CATEGORY_ICON = {
-  'Makan & Minum': { icon: 'ti-bowl-chopsticks', bg: '#FEF3C7' },
-  'Transportasi':  { icon: 'ti-car',              bg: '#EFF6FF' },
-  'Hiburan':       { icon: 'ti-device-tv',         bg: '#FEE2E2' },
-  'Belanja':       { icon: 'ti-shopping-bag',      bg: '#F3E8FF' },
-  'Pendidikan':    { icon: 'ti-book',              bg: '#CCFBF1' },
-  'Kesehatan':     { icon: 'ti-heart',             bg: '#FCE7F3' },
-  'Lainnya':       { icon: 'ti-dots',              bg: '#F1F5F9' },
+  'Makan & Minum':       { icon: 'ti-bowl-chopsticks', bg: '#FEF3C7' },
+  'Transportasi':        { icon: 'ti-car',              bg: '#EFF6FF' },
+  'Hiburan & Nongkrong': { icon: 'ti-device-tv',        bg: '#FEE2E2' },
+  'Kebutuhan Kuliah':    { icon: 'ti-book',             bg: '#CCFBF1' },
+  'Tagihan & Kos':       { icon: 'ti-home',             bg: '#F3E8FF' },
 }
 
 function getCatStyle(category) {
@@ -194,13 +192,10 @@ async function loadQuests() {
 
 async function loadLeaderboard() {
   const month = new Date().toISOString().slice(0, 7)
-  const res = await apiGet(`/users/leaderboard/monthly?month=${month}`)
+  const res = await apiGet(`/users/leaderboard/liga?month=${month}&user_id=${currentUser.id || 1}`)
   if (res && res.success) {
-    rankData = (res.data || []).map(r => ({
-      ...r,
-      me: r.user_id === (currentUser.id || 1),
-      name: r.display_name || r.name
-    }))
+    rankData = res.data
+    syncLigaBadges()
   }
 }
 
@@ -274,18 +269,26 @@ function renderMiniQuest() {
 function renderMiniRank() {
   const el = document.getElementById('mini-rank-list')
   if (!el) return
-  if (rankData.length === 0) {
+  if (!rankData || !rankData.liga_user) {
     el.innerHTML = '<div style="font-size:12px;color:var(--gray-400);padding:8px;">Data leaderboard belum tersedia.</div>'
     return
   }
-  el.innerHTML = rankData.slice(0, 5).map((r, i) => `
-    <div class="rank-item ${r.me ? 'me' : ''}" onclick="openPlayerProfile(${i})">
-      <div class="rank-num ${i < 3 ? 'top' : ''}">${i+1}</div>
-      <div class="avatar avatar-sm" style="${r.me ? 'background:var(--brand);' : 'background:var(--gray-200);color:var(--gray-600);'}">${(r.name||'?').charAt(0)}</div>
-      <div class="rank-name" style="${r.me ? 'color:var(--brand);font-weight:600;' : ''}">${r.me ? 'Kamu' : r.name}</div>
-      <div class="rank-exp">${(r.exp||0).toLocaleString('id-ID')}</div>
+  const liga = rankData.liga_user
+  const myLigaData = rankData.leaderboard?.find(l => l.liga_id === liga.id)
+  const top3 = myLigaData?.top10?.slice(0, 3) || []
+
+  el.innerHTML = `
+    <div style="font-size:11px;font-weight:600;color:${liga.color};margin-bottom:8px;">
+      ${liga.icon} ${liga.label} — Posisimu: #${myLigaData?.user_rank_di_liga || '?'}
     </div>
-  `).join('')
+    ${top3.map((r, i) => `
+      <div class="rank-item ${r.is_me ? 'me' : ''}">
+        <div class="rank-num ${i < 3 ? 'top' : ''}">${['🥇','🥈','🥉'][i]}</div>
+        <div class="avatar avatar-sm" style="${r.is_me ? 'background:var(--brand);' : 'background:var(--gray-200);color:var(--gray-600);'}">${(r.name||'?').charAt(0)}</div>
+        <div class="rank-name" style="${r.is_me ? 'color:var(--brand);font-weight:600;' : ''}">${r.is_me ? 'Kamu' : r.name}</div>
+        <div class="rank-exp">${(r.exp||0).toLocaleString('id-ID')}</div>
+      </div>`).join('')}
+  `
 }
 
 function renderQuestFull() {
@@ -334,28 +337,188 @@ function renderQuestFull() {
   }).join('')
 }
 
+// ── SYNC LIGA BADGES ──
+// Keeps sidebar level text, arena header, profile badge, and dashboard liga card
+// always in sync with the current user's actual liga.
+function syncLigaBadges() {
+  if (!rankData || !rankData.liga_user) return
+  const liga = rankData.liga_user
+  const user = rankData.user
+
+  // Map liga.id → CSS tier class (existing classes in style.css)
+  const TIER_CLASS = { gold: 'tier-gold', silver: 'tier-silver', bronze: 'tier-bronze', iron: 'tier-iron' }
+  const tierCls = TIER_CLASS[liga.id] || 'tier-iron'
+
+  // 1. Sidebar: "Level X · Liga Y"
+  const sidebarLevel = document.getElementById('sidebar-user-level')
+  if (sidebarLevel) sidebarLevel.textContent = `Level ${user?.level || 1} · ${liga.label}`
+
+  // 2. Arena page header subtitle
+  const arenaSub = document.getElementById('arena-page-sub')
+  if (arenaSub) arenaSub.textContent = `Persaingan sesama ${liga.label} — EXP terbanyak bulan ini`
+
+  // 3. Arena page top-right tier badge
+  const arenaBadge = document.getElementById('arena-liga-badge')
+  if (arenaBadge) {
+    arenaBadge.className = `tier-badge ${tierCls}`
+    arenaBadge.innerHTML = `<i class="ti ti-medal"></i> ${liga.label}`
+  }
+
+  // 4. Profil page tier badge
+  const profilBadge = document.getElementById('profil-liga-badge')
+  if (profilBadge) {
+    profilBadge.className = `tier-badge ${tierCls}`
+    profilBadge.innerHTML = `<i class="ti ti-medal"></i> ${liga.label.replace('Liga ', '')}`
+  }
+
+  // 5. Dashboard metric "Liga Saat Ini"
+  const dashName = document.getElementById('dashboard-liga-name')
+  if (dashName) dashName.textContent = liga.label.replace('Liga ', '')
+
+  const dashBadge = document.getElementById('dashboard-liga-badge')
+  if (dashBadge) {
+    dashBadge.className = `tier-badge ${tierCls}`
+    dashBadge.innerHTML = `<i class="ti ti-medal"></i> ${liga.label.replace('Liga ', '')}`
+  }
+
+  const dashboardExpLevel = document.getElementById('dashboard-exp-level')
+  if (dashboardExpLevel && user) {
+    dashboardExpLevel.textContent = `Level ${user.level || 1}`
+  }
+  const dashboardExpText = document.getElementById('dashboard-exp-text')
+  if (dashboardExpText && user) {
+    dashboardExpText.textContent = `${(user.exp || 0).toLocaleString('id-ID')} EXP`
+  }
+
+  const arenaUserCard = document.getElementById('arena-user-card')
+  if (arenaUserCard && user) {
+    const myLigaData = rankData.leaderboard?.find(l => l.liga_id === liga.id)
+    const myRank = myLigaData?.user_rank_di_liga || '?'
+    const totalInLiga = myLigaData?.top10?.length || 0
+    arenaUserCard.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;padding:12px;background:${liga.liga_color}18;border-radius:var(--radius-sm);border:1px solid ${liga.liga_color}30;">
+        <div class="avatar" style="background:${liga.liga_color};">${(user.name||'?').charAt(0)}</div>
+        <div style="flex:1;">
+          <div style="font-size:13px;font-weight:600;color:${liga.liga_color};">Posisimu saat ini: #${myRank}</div>
+          <div style="font-size:11px;color:var(--gray-500);margin-top:2px;">${(user.exp||0).toLocaleString('id-ID')} EXP · ${liga.label}</div>
+        </div>
+        <span style="font-size:20px;">${liga.icon}</span>
+      </div>`
+  }
+}
+
 function renderRankFull() {
   const el = document.getElementById('rank-list-full')
   if (!el) return
-  if (rankData.length === 0) {
+  if (!rankData || !rankData.leaderboard) {
     el.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:24px;font-size:13px;">Data leaderboard belum tersedia.</div>'
     return
   }
-  el.innerHTML = `
-    <div class="rank-item" style="font-weight:600;font-size:11px;color:var(--gray-400);padding:6px 14px;cursor:default;">
-      <div class="rank-num">#</div>
-      <div style="width:28px;"></div>
-      <div style="flex:1;">Pemain</div>
-      <div>EXP bulan ini</div>
-    </div>
-  ` + rankData.map((r, i) => `
-    <div class="rank-item ${r.me ? 'me' : ''}" onclick="openPlayerProfile(${i})">
-      <div class="rank-num ${i < 3 ? 'top' : ''}">${i < 3 ? ['🥇','🥈','🥉'][i] : i+1}</div>
-      <div class="avatar avatar-sm" style="${r.me ? 'background:var(--brand);' : 'background:var(--gray-200);color:var(--gray-600);'}">${(r.name||'?').charAt(0)}</div>
-      <div class="rank-name" style="${r.me ? 'color:var(--brand);font-weight:600;' : ''}">${r.me ? '⭐ Kamu ('+r.name+')' : r.name}</div>
-      <div class="rank-exp">${(r.exp||0).toLocaleString('id-ID')}</div>
-    </div>
-  `).join('')
+
+  const { leaderboard, liga_user, user } = rankData
+
+  // Sync all badges across the app
+  syncLigaBadges()
+
+  const otherLeagues = leaderboard.filter(l => !l.is_user_liga)
+  const userLeague   = leaderboard.find(l => l.is_user_liga)
+
+  // ── Helper: compact top-3 card for other leagues ──
+  function renderOtherLigaCard(liga) {
+    const top3 = liga.top10?.slice(0, 3) || []
+    const medals = ['🥇','🥈','🥉']
+    const rows = top3.length > 0
+      ? top3.map((r, i) => `
+          <div class="other-liga-row${i === top3.length - 1 ? ' last' : ''}">
+            <div class="other-medal">${medals[i]}</div>
+            <div class="avatar avatar-sm other-avatar" style="background:${liga.liga_color}22;color:${liga.liga_color};font-weight:700;font-size:11px;">
+              ${(r.name||'?').charAt(0)}
+            </div>
+            <div class="other-name">${r.name}</div>
+            <div class="other-exp">${(r.exp||0).toLocaleString('id-ID')}</div>
+          </div>`).join('')
+      : `<div class="other-empty">Belum ada pemain</div>`
+
+    return `
+    <div class="other-liga-card" style="border-color:${liga.liga_color}40;">
+      <div class="other-liga-header" style="background:${liga.liga_color}12;border-bottom-color:${liga.liga_color}25;">
+        <span class="other-liga-icon">${liga.liga_icon}</span>
+        <div class="other-liga-title" style="color:${liga.liga_color};">${liga.liga_label}</div>
+      </div>
+      <div class="other-liga-body">${rows}</div>
+    </div>`
+  }
+
+  // ── Helper: full leaderboard for user's league ──
+  function renderUserLiga(liga) {
+    if (!liga) return ''
+    const rows = liga.top10 && liga.top10.length > 0
+      ? liga.top10.map((r, i) => `
+          <div class="rank-item ${r.is_me ? 'me' : ''}" style="${r.is_me ? `background:${liga.liga_color}15;` : ''}">
+            <div class="rank-num ${i < 3 ? 'top' : ''}" style="color:${i < 3 ? liga.liga_color : 'var(--gray-400)'};font-weight:700;">
+              ${i < 3 ? ['🥇','🥈','🥉'][i] : `#${i+1}`}
+            </div>
+            <div class="avatar avatar-sm" style="${r.is_me ? `background:${liga.liga_color};` : 'background:var(--gray-200);color:var(--gray-600);'}">
+              ${(r.name||'?').charAt(0)}
+            </div>
+            <div style="flex:1;">
+              <div style="font-size:13px;font-weight:${r.is_me?'700':'500'};color:${r.is_me?liga.liga_color:'var(--gray-800)'};">
+                ${r.is_me ? `⭐ Kamu (${r.name})` : r.name}
+              </div>
+              <div style="font-size:11px;color:var(--gray-400);">Level ${r.level}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:13px;font-weight:600;color:var(--gray-700);">${(r.exp||0).toLocaleString('id-ID')}</div>
+              <div style="font-size:10px;color:var(--gray-400);">EXP</div>
+            </div>
+          </div>`).join('')
+      : `<div style="text-align:center;font-size:12px;color:var(--gray-300);padding:16px;">Belum ada pemain di liga ini</div>`
+
+    const userNotInTop10 = liga.user_rank_di_liga && liga.user_rank_di_liga > 10
+    const userExtraRow = userNotInTop10 ? `
+      <div style="border-top:1px dashed var(--gray-200);margin-top:6px;padding-top:6px;">
+        <div class="rank-item me" style="background:${liga.liga_color}15;">
+          <div class="rank-num" style="color:${liga.liga_color};font-weight:700;">#${liga.user_rank_di_liga}</div>
+          <div class="avatar avatar-sm" style="background:${liga.liga_color};">${(user?.name||'?').charAt(0)}</div>
+          <div style="flex:1;">
+            <div style="font-size:13px;font-weight:700;color:${liga.liga_color};">⭐ Kamu (${user?.name})</div>
+            <div style="font-size:11px;color:var(--gray-400);">Level ${user?.level}</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:13px;font-weight:600;color:var(--gray-700);">${(user?.exp||0).toLocaleString('id-ID')}</div>
+            <div style="font-size:10px;color:var(--gray-400);">EXP</div>
+          </div>
+        </div>
+      </div>` : ''
+
+    return `
+    <!-- ── Liga Kamu (full leaderboard) ── -->
+    <div style="margin-bottom:8px;">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--gray-400);margin-bottom:10px;">Leaderboard Ligamu</div>
+      <div style="border-radius:var(--radius);border:2px solid ${liga.liga_color};overflow:hidden;">
+        <div style="padding:12px 16px;background:${liga.liga_color}18;display:flex;align-items:center;gap:10px;border-bottom:1px solid ${liga.liga_color}30;">
+          <span style="font-size:22px;">${liga.liga_icon}</span>
+          <div style="flex:1;">
+            <div style="font-size:15px;font-weight:700;color:${liga.liga_color};">${liga.liga_label}</div>
+            <div style="font-size:11px;color:var(--gray-400);">Top 10 pemain bulan ini</div>
+          </div>
+          <span style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:700;background:${liga.liga_color};color:white;">Liga Kamu</span>
+        </div>
+        <div style="padding:8px;">${rows}${userExtraRow}</div>
+      </div>
+    </div>`
+  }
+
+  // ── RENDER: other leagues grid (top) → user liga centered → full leaderboard ──
+  const otherGrid = otherLeagues.length > 0 ? `
+    <div style="margin-bottom:20px;">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--gray-400);margin-bottom:10px;">Liga Lainnya — Top 3</div>
+      <div class="other-liga-grid">
+        ${otherLeagues.map(renderOtherLigaCard).join('')}
+      </div>
+    </div>` : ''
+
+  el.innerHTML = otherGrid + renderUserLiga(userLeague)
 }
 
 // ── TRANSAKSI ──
@@ -364,6 +527,7 @@ async function simpanTransaksi() {
   const kat = document.getElementById('tx-kategori').value
   const cat = document.getElementById('tx-catatan').value || kat
   const tanggal = document.getElementById('tx-tanggal').value
+  const payment = document.querySelector('input[name="payment_method"]:checked')?.value || 'Cash'
 
   if (!nom || nom <= 0) {
     showToast('warn', '⚠️ Nominal tidak valid', 'Masukkan nominal yang benar.')
@@ -373,12 +537,16 @@ async function simpanTransaksi() {
   closeModal('modal-transaksi')
   document.getElementById('tx-nominal').value = ''
   document.getElementById('tx-catatan').value = ''
+  // Reset payment ke Cash
+  document.getElementById('pm-cash').checked = true
+  updatePaymentUI('cash')
 
   // Kirim ke backend
   const result = await apiPost('/transactions', {
     user_id: currentUser.id || 1,
     amount: nom,
     category: kat,
+    payment_method: payment,
     note: cat,
     date: tanggal
   })
@@ -387,7 +555,6 @@ async function simpanTransaksi() {
     const d = result.data
     usedBudget += nom
 
-    // Reload data terbaru dari DB
     await loadTransaksi()
     await loadUser()
     await loadLeaderboard()
@@ -396,9 +563,14 @@ async function simpanTransaksi() {
     const sisa = totalBudget - usedBudget
     if (sisa < 0) {
       showToast('warn', '⚠️ Over budget!', `Kamu melebihi budget sebesar Rp ${Math.abs(sisa).toLocaleString('id-ID')}`)
-    } else {
-      showExpPopup(d.xp_earned, d.level_up, d.level_title, d.level_badge)
     }
+
+    // Tampilkan notif naik liga kalau ada
+    if (d.liga_baru) {
+      showToast('success', `${d.liga_baru.icon} Naik Liga!`, `Selamat! Kamu masuk ke ${d.liga_baru.label}!`)
+    }
+
+    showExpPopup(d.exp_awarded, d.level_up, d.level_title, d.level_badge)
   } else {
     showToast('warn', '⚠️ Gagal menyimpan', result?.message || 'Periksa koneksi ke server.')
   }
@@ -545,9 +717,9 @@ async function selesaikanMisi(id) {
     const q = questData.find(x => x.id === id)
     if (q) q.status = 'claimed'
 
-    await loadUser()
-    renderQuestFull()
-    renderMiniQuest()
+    // Reload SEMUA data supaya EXP, leaderboard, dan profil langsung update
+    await Promise.all([loadUser(), loadLeaderboard()])
+    renderAll()
 
     // Tampilkan modal hasil
     document.getElementById('hasil-icon').textContent = result.data?.level_up ? '🏆' : '⭐'
@@ -571,7 +743,6 @@ async function selesaikanMisi(id) {
     openModal('modal-hasil-verifikasi')
 
   } else {
-    // Belum memenuhi kondisi
     document.getElementById('hasil-icon').textContent = '⚠️'
     document.getElementById('hasil-title').textContent = 'Misi Belum Selesai'
     document.getElementById('hasil-detail').textContent = result?.detail || result?.message || 'Kondisi misi belum terpenuhi.'
@@ -582,8 +753,10 @@ async function selesaikanMisi(id) {
 }
 
 // ── LEADERBOARD PROFILE ──
-function openPlayerProfile(idx) {
-  const r = rankData[idx]
+function openPlayerProfile(ligaId, rank) {
+  // Cari data pemain dari liga dan rank tertentu
+  const ligaData = rankData?.leaderboard?.find(l => l.liga_id === ligaId)
+  const r = ligaData?.top3?.[rank - 1]
   if (!r) return
   document.getElementById('pp-avatar').textContent = (r.name||'?').charAt(0)
   document.getElementById('pp-name').textContent = r.name
@@ -648,9 +821,35 @@ async function simpanProfil() {
   showToast('success', '✅ Profil diperbarui!', result?.success ? 'Data tersimpan ke database.' : 'Data tersimpan lokal.')
 }
 
+// ── PAYMENT METHOD UI ──
+function updatePaymentUI(selected) {
+  const options = { cash: 'po-cash', ewallet: 'po-ewallet', card: 'po-card' }
+  Object.entries(options).forEach(([key, elId]) => {
+    const el = document.getElementById(elId)
+    if (!el) return
+    if (key === selected) {
+      el.style.border = '2px solid var(--brand)'
+      el.style.background = 'var(--brand-light)'
+      el.style.color = 'var(--brand)'
+    } else {
+      el.style.border = '2px solid var(--gray-200)'
+      el.style.background = 'white'
+      el.style.color = 'var(--gray-500)'
+    }
+  })
+}
+
 // ── INIT ──
 window.addEventListener('load', () => {
   const today = new Date().toISOString().split('T')[0]
   const txDate = document.getElementById('tx-tanggal')
   if (txDate) txDate.value = today
+
+  // Event listener payment method radio buttons
+  document.querySelectorAll('input[name="payment_method"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const map = { 'Cash': 'cash', 'E-Wallet': 'ewallet', 'Credit Card': 'card' }
+      updatePaymentUI(map[radio.value] || 'cash')
+    })
+  })
 })

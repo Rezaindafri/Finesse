@@ -7,58 +7,69 @@ const router = Router()
 async function verifikasiMisi(quest, userId) {
   const now = new Date()
   const today = now.toISOString().slice(0, 10)
-  const thisWeekStart = new Date(now)
-  thisWeekStart.setDate(now.getDate() - now.getDay())
-  const weekStart = thisWeekStart.toISOString().slice(0, 10)
+
+  // Gunakan start_date dari quest, fallback ke 30 hari ke belakang
+  const startDate = quest.start_date || (() => {
+    const d = new Date(now)
+    d.setDate(d.getDate() - 30)
+    return d.toISOString().slice(0, 10)
+  })()
+
+  // Deadline: gunakan quest.deadline, fallback ke hari ini
+  const deadline = quest.deadline || today
 
   switch (quest.quest_type) {
 
     // Tipe: hemat total — total pengeluaran di bawah target dalam periode
     case 'hemat_total': {
-      const deadline = quest.deadline || today
       const row = await db.get(
         `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
          WHERE user_id = ? AND date >= ? AND date <= ?`,
-        [userId, quest.start_date || weekStart, deadline]
+        [userId, startDate, deadline]
       )
       const totalSpend = row?.total || 0
-      const lolos = totalSpend <= (quest.target_amount || 0)
+      const target = quest.target_amount || 0
+      // Lolos kalau: ada transaksi (user aktif) DAN total di bawah target
+      // Atau kalau total = 0 (tidak ada transaksi sama sekali = hemat sempurna)
+      const lolos = totalSpend <= target
       return {
         lolos,
-        detail: `Total pengeluaran: Rp ${totalSpend.toLocaleString('id-ID')} dari target hemat Rp ${(quest.target_amount||0).toLocaleString('id-ID')}`,
+        detail: `Total pengeluaran: Rp ${totalSpend.toLocaleString('id-ID')} dari target hemat Rp ${target.toLocaleString('id-ID')}`,
         actual: totalSpend
       }
     }
 
     // Tipe: batas harian — pengeluaran hari ini tidak melebihi target
     case 'batas_harian': {
+      // Cek pengeluaran di tanggal deadline (bukan hanya "hari ini")
+      // sehingga misi bisa diklaim kapanpun selama kondisi terpenuhi
+      const checkDate = deadline <= today ? deadline : today
       const row = await db.get(
         `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
          WHERE user_id = ? AND date = ?`,
-        [userId, today]
+        [userId, checkDate]
       )
       const totalHari = row?.total || 0
-      const lolos = totalHari <= (quest.target_amount || 0)
+      const target = quest.target_amount || 0
+      const lolos = totalHari <= target
       return {
         lolos,
-        detail: `Pengeluaran hari ini: Rp ${totalHari.toLocaleString('id-ID')} dari batas Rp ${(quest.target_amount||0).toLocaleString('id-ID')}`,
+        detail: `Pengeluaran pada ${checkDate}: Rp ${totalHari.toLocaleString('id-ID')} dari batas Rp ${target.toLocaleString('id-ID')}`,
         actual: totalHari
       }
     }
 
     // Tipe: batas frekuensi — jumlah transaksi kategori tertentu tidak melebihi target
-    // Kalau lebih dari target → misi HANGUS
     case 'batas_frekuensi': {
-      const deadline = quest.deadline || today
       const row = await db.get(
         `SELECT COUNT(*) as jumlah FROM transactions
          WHERE user_id = ? AND category = ? AND date >= ? AND date <= ?`,
-        [userId, quest.target_category, quest.start_date || weekStart, deadline]
+        [userId, quest.target_category, startDate, deadline]
       )
       const jumlah = row?.jumlah || 0
       const target = quest.target_count || 3
       const hangus = jumlah > target
-      const lolos = jumlah <= target && !hangus
+      const lolos = !hangus
       return {
         lolos,
         hangus,
@@ -69,17 +80,17 @@ async function verifikasiMisi(quest, userId) {
 
     // Tipe: batas kategori — total pengeluaran kategori tertentu tidak melebihi target
     case 'batas_kategori': {
-      const deadline = quest.deadline || today
       const row = await db.get(
         `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
          WHERE user_id = ? AND category = ? AND date >= ? AND date <= ?`,
-        [userId, quest.target_category, quest.start_date || weekStart, deadline]
+        [userId, quest.target_category, startDate, deadline]
       )
       const totalKat = row?.total || 0
-      const lolos = totalKat <= (quest.target_amount || 0)
+      const target = quest.target_amount || 0
+      const lolos = totalKat <= target
       return {
         lolos,
-        detail: `Total ${quest.target_category}: Rp ${totalKat.toLocaleString('id-ID')} dari batas Rp ${(quest.target_amount||0).toLocaleString('id-ID')}`,
+        detail: `Total ${quest.target_category}: Rp ${totalKat.toLocaleString('id-ID')} dari batas Rp ${target.toLocaleString('id-ID')}`,
         actual: totalKat
       }
     }
@@ -279,9 +290,12 @@ router.post('/generate', async (req, res) => {
 
 // ── POST /api/quests/:id/selesaikan — verifikasi + klaim misi ──
 router.post('/:id/selesaikan', async (req, res) => {
-  const { user_id = 1 } = req.body
+  // user_id bisa dari body atau query param sebagai fallback
+  const user_id = parseInt(req.body?.user_id || req.query?.user_id || 1)
+  const questId = parseInt(req.params.id)
+
   try {
-    const quest = await db.get('SELECT * FROM quests WHERE id = ?', [req.params.id])
+    const quest = await db.get('SELECT * FROM quests WHERE id = ?', [questId])
     if (!quest) return res.status(404).json({ success: false, message: 'Misi tidak ditemukan' })
     if (quest.status === 'claimed') return res.status(400).json({ success: false, message: 'Misi sudah diklaim sebelumnya!' })
     if (quest.status === 'hangus') return res.status(400).json({ success: false, message: 'Misi ini sudah hangus.' })
@@ -291,7 +305,7 @@ router.post('/:id/selesaikan', async (req, res) => {
 
     // Kalau hangus (khusus batas_frekuensi yang kelewatan)
     if (hasil.hangus) {
-      await db.run(`UPDATE quests SET status = 'hangus' WHERE id = ?`, [quest.id])
+      await db.run(`UPDATE quests SET status = 'hangus' WHERE id = ?`, [questId])
       return res.status(400).json({
         success: false,
         hangus: true,
@@ -309,20 +323,45 @@ router.post('/:id/selesaikan', async (req, res) => {
       })
     }
 
-    // Lolos → klaim EXP
-    await db.run(`UPDATE quests SET status = 'claimed', progress = 1 WHERE id = ?`, [quest.id])
-    const user = await db.get('SELECT exp, level FROM users WHERE id = ?', [user_id])
-    const newExp = (user?.exp || 0) + quest.exp_reward
+    // ── Lolos → klaim EXP ──
 
-    // Hitung level baru
+    // 1. Tandai quest sebagai claimed
+    await db.run(`UPDATE quests SET status = 'claimed', progress = 1 WHERE id = ?`, [questId])
+
+    // 2. Ambil data user TERBARU dari DB
+    const user = await db.get('SELECT id, exp, level FROM users WHERE id = ?', [user_id])
+    if (!user) return res.status(404).json({ success: false, message: 'User tidak ditemukan' })
+
+    const oldExp = user.exp || 0
+    const oldLevel = user.level || 1
+    const newExp = oldExp + quest.exp_reward
+
+    // 3. Cari level baru berdasarkan total EXP
     const newLevel = await db.get(
       'SELECT level, title, badge FROM levels WHERE min_xp <= ? AND max_xp >= ?',
       [newExp, newExp]
     )
+    const finalLevel = newLevel?.level || oldLevel
+
+    // 4. Update EXP dan level user ke DB
     await db.run(
       'UPDATE users SET exp = ?, level = ? WHERE id = ?',
-      [newExp, newLevel?.level || user?.level, user_id]
+      [newExp, finalLevel, user_id]
     )
+
+    // 5. Update leaderboard bulan ini
+    const month = new Date().toISOString().slice(0, 7)
+    const lb = await db.get('SELECT id FROM leaderboard WHERE user_id = ? AND month = ?', [user_id, month])
+    if (lb) {
+      await db.run(
+        'UPDATE leaderboard SET exp = exp + ?, level = ? WHERE user_id = ? AND month = ?',
+        [quest.exp_reward, finalLevel, user_id, month]
+      )
+    }
+
+    // 6. Verifikasi hasil update (untuk debugging)
+    const updatedUser = await db.get('SELECT exp, level FROM users WHERE id = ?', [user_id])
+    console.log(`[Quest Claim] User ${user_id}: ${oldExp} → ${updatedUser.exp} EXP (+${quest.exp_reward})`)
 
     res.json({
       success: true,
@@ -330,13 +369,17 @@ router.post('/:id/selesaikan', async (req, res) => {
       detail: hasil.detail,
       data: {
         exp_earned: quest.exp_reward,
-        total_exp: newExp,
-        level_up: newLevel?.level > (user?.level || 1),
+        exp_sebelum: oldExp,
+        total_exp: updatedUser.exp,
+        level_before: oldLevel,
+        level_after: finalLevel,
+        level_up: finalLevel > oldLevel,
         level_title: newLevel?.title,
         level_badge: newLevel?.badge
       }
     })
   } catch (err) {
+    console.error('[Quest Claim Error]', err)
     res.status(500).json({ success: false, message: err.message })
   }
 })
