@@ -76,6 +76,10 @@ function showPage(page, navEl) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'))
   if (navEl) navEl.classList.add('active')
   closeSidebar()
+  // Saat user buka halaman Arena → panggil sync-league ke FastAPI
+  if (page === 'arena') {
+    syncLeagueAndRefreshArena()
+  }
 }
 
 function setMobileNav(page) {
@@ -156,7 +160,6 @@ async function loadUser() {
     currentUser = res.data
     totalBudget = currentUser.budget || 2000000
 
-    // Update tampilan profil
     const nama = currentUser.name || 'Budi'
     const el = document.getElementById('profil-nama')
     if (el) el.textContent = nama
@@ -169,9 +172,11 @@ async function loadUser() {
     const avatarLevelBadge = document.getElementById('avatar-level-badge')
     if (avatarLevelBadge) avatarLevelBadge.textContent = currentUser.level || 1
 
-    // Update EXP display
     const expEl = document.getElementById('profil-exp')
     if (expEl) expEl.textContent = `${(currentUser.exp || 0).toLocaleString('id-ID')} EXP · Level ${currentUser.level || 1}`
+
+    // Update badge liga di profil, sidebar, dan header arena
+    syncLigaBadges()
   }
 }
 
@@ -201,6 +206,36 @@ async function loadLeaderboard() {
     rankData = res.data
     syncLigaBadges()
   }
+}
+
+// ── Panggil FastAPI /get-league, update DB, lalu refresh leaderboard ──
+async function syncLeagueAndRefreshArena() {
+  // Tampilkan loading di rank-list-full
+  const el = document.getElementById('rank-list-full')
+  if (el) el.innerHTML = '<div style="text-align:center;color:var(--gray-400);padding:24px;font-size:13px;"><i class="ti ti-loader" style="animation:spin 1s linear infinite;margin-right:6px;"></i> Memperbarui liga dari AI...</div>'
+
+  try {
+    // Panggil endpoint sync-league — Node.js akan hit /get-league ke FastAPI
+    const syncRes = await apiPost('/users/1/sync-league', {})
+
+    if (syncRes && syncRes.success) {
+      if (syncRes.data?.updated) {
+        const liga = syncRes.data.liga
+        showToast('success', `${liga.icon} Liga diperbarui!`, `Model AI menempatkan kamu di ${liga.label}`)
+      }
+      // Update currentUser.liga agar badge di profil ikut update
+      if (currentUser && syncRes.data?.liga) {
+        currentUser.liga = syncRes.data.liga.id
+      }
+    }
+  } catch (err) {
+    console.warn('[syncLeague] gagal:', err.message)
+  }
+
+  // Muat ulang data leaderboard (pakai liga yang sudah diupdate)
+  await loadLeaderboard()
+  renderRankFull()
+  renderMiniRank()
 }
 
 // ── RENDER ──
@@ -406,7 +441,7 @@ function renderQuestFull() {
   }
 
   el.innerHTML = questData.map(q => {
-    const diff = DIFFICULTY_CONFIG[q.difficulty] || DIFFICULTY_CONFIG.medium
+    const diff = getDiffConfig(q.difficulty)
     const isClaimed = q.status === 'claimed'
     const isHangus = q.status === 'hangus'
     const isActive = q.status === 'active'
@@ -427,12 +462,12 @@ function renderQuestFull() {
       </div>
       <div style="margin:6px 0;">
         ${statusBadge}
-        <span style="margin-left:6px;padding:2px 8px;border-radius:10px;font-size:10px;background:var(--gray-100);color:var(--gray-500);">${QUEST_TYPE_LABEL[q.quest_type]||'📋 Misi'}</span>
+        <span style="margin-left:6px;padding:2px 8px;border-radius:10px;font-size:10px;background:var(--gray-100);color:var(--gray-500);">${getQuestTypeLabel(q.quest_type)}</span>
       </div>
       <div class="quest-desc" style="margin-top:8px;">${q.reason || q.description || ''}</div>
       ${isActive ? `
-        <button class="btn btn-primary" style="width:100%;margin-top:12px;font-size:13px;" onclick="event.stopPropagation();selesaikanMisi(${q.id})">
-          ✅ Selesaikan Misi
+        <button class="btn btn-primary" style="width:100%;margin-top:12px;font-size:13px;" onclick="event.stopPropagation();openQuestDetail(${q.id})">
+          <i class="ti ti-circle-check"></i> Sudah Selesai
         </button>` : ''}
     </div>`
   }).join('')
@@ -688,9 +723,25 @@ async function simpanTransaksi() {
 // ── QUEST SYSTEM ──
 
 const DIFFICULTY_CONFIG = {
+  // Key internal (dari backend setelah normalisasi)
   easy:   { label: 'Mudah',  color: '#10B981', bg: '#D1FAE5', icon: '🟢' },
   medium: { label: 'Sedang', color: '#F59E0B', bg: '#FEF3C7', icon: '🟡' },
   hard:   { label: 'Susah',  color: '#EF4444', bg: '#FEE2E2', icon: '🔴' },
+  // Alias bahasa Indonesia (kalau tersimpan dalam format lama di DB)
+  mudah:  { label: 'Mudah',  color: '#10B981', bg: '#D1FAE5', icon: '🟢' },
+  sedang: { label: 'Sedang', color: '#F59E0B', bg: '#FEF3C7', icon: '🟡' },
+  susah:  { label: 'Susah',  color: '#EF4444', bg: '#FEE2E2', icon: '🔴' },
+  sulit:  { label: 'Susah',  color: '#EF4444', bg: '#FEE2E2', icon: '🔴' },
+}
+
+// Normalisasi difficulty di frontend (untuk data lama yang belum ternormalisasi di DB)
+function getDiffConfig(raw) {
+  if (!raw) return DIFFICULTY_CONFIG.medium
+  const key = raw.toString().toLowerCase()
+  if (DIFFICULTY_CONFIG[key]) return DIFFICULTY_CONFIG[key]
+  if (/mudah|easy|gampang|ringan/i.test(key)) return DIFFICULTY_CONFIG.easy
+  if (/susah|hard|sulit|berat/i.test(key)) return DIFFICULTY_CONFIG.hard
+  return DIFFICULTY_CONFIG.medium
 }
 
 const QUEST_TYPE_LABEL = {
@@ -698,6 +749,18 @@ const QUEST_TYPE_LABEL = {
   batas_harian:    '📅 Batas Harian',
   batas_frekuensi: '🔢 Batas Frekuensi',
   batas_kategori:  '🏷️ Batas Kategori',
+}
+
+// Normalisasi quest_type di frontend (untuk data lama di DB)
+function getQuestTypeLabel(raw) {
+  if (!raw) return '📋 Misi'
+  if (QUEST_TYPE_LABEL[raw]) return QUEST_TYPE_LABEL[raw]
+  const s = raw.toLowerCase()
+  if (/hemat|total|disiplin/i.test(s)) return '💰 Hemat Total'
+  if (/harian|hari/i.test(s)) return '📅 Batas Harian'
+  if (/frekuensi|kali/i.test(s)) return '🔢 Batas Frekuensi'
+  if (/kategori/i.test(s)) return '🏷️ Batas Kategori'
+  return '📋 Misi'
 }
 
 async function cekTokenStatus() {
@@ -744,11 +807,15 @@ async function generateMisi() {
   }
 }
 
+// ID misi yang sedang aktif di modal (untuk submitSelesaikanMisi)
+let _activeMisiId = null
+
 function openQuestDetail(id) {
   const q = questData.find(x => x.id === id)
   if (!q) return
+  _activeMisiId = id
 
-  const diff = DIFFICULTY_CONFIG[q.difficulty] || DIFFICULTY_CONFIG.medium
+  const diff = getDiffConfig(q.difficulty)
   const isClaimed = q.status === 'claimed'
   const isHangus = q.status === 'hangus'
   const isActive = q.status === 'active'
@@ -758,52 +825,38 @@ function openQuestDetail(id) {
   document.getElementById('md-desc').textContent = q.description || ''
   document.getElementById('md-reward').textContent = `+${q.exp_reward} EXP`
 
-  // Badge difficulty
+  // Badge difficulty + tipe misi
   const diffBadge = document.getElementById('md-difficulty-badge')
   diffBadge.innerHTML = `
     <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:20px;font-size:12px;font-weight:600;background:${diff.bg};color:${diff.color};">
       ${diff.icon} ${diff.label}
     </span>
     <span style="margin-left:8px;display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;font-size:12px;background:var(--gray-100);color:var(--gray-600);">
-      ${QUEST_TYPE_LABEL[q.quest_type] || '📋 Misi'}
+      ${getQuestTypeLabel(q.quest_type)}
     </span>`
 
-  // Target info
-  const targetInfo = document.getElementById('md-target-info')
-  let targetText = ''
-  if (q.quest_type === 'hemat_total' || q.quest_type === 'batas_harian' || q.quest_type === 'batas_kategori') {
-    targetText = `🎯 Target: maks Rp ${(q.target_amount||0).toLocaleString('id-ID')}`
-    if (q.target_category) targetText += ` untuk kategori <strong>${q.target_category}</strong>`
-  } else if (q.quest_type === 'batas_frekuensi') {
-    targetText = `🎯 Target: maks <strong>${q.target_count}x</strong> transaksi <strong>${q.target_category}</strong> — jika lebih, misi <span style="color:#EF4444;font-weight:600;">hangus!</span>`
-  }
-  targetInfo.innerHTML = targetText
-
-  // Deadline
-  const deadlineEl = document.getElementById('md-deadline')
-  deadlineEl.textContent = q.deadline ? `⏰ Deadline: ${formatTanggal(q.deadline)}` : ''
 
   // Progress & status
   const progBar = document.getElementById('md-progress')
   const progLabel = document.getElementById('md-prog-label')
   if (isClaimed) {
-    progBar.style.width = '100%'
-    progBar.style.background = 'var(--teal)'
+    progBar.style.width = '100%'; progBar.style.background = 'var(--teal)'
     progLabel.textContent = '✅ Selesai & diklaim'
   } else if (isHangus) {
-    progBar.style.width = '100%'
-    progBar.style.background = '#EF4444'
+    progBar.style.width = '100%'; progBar.style.background = '#EF4444'
     progLabel.textContent = '💀 Misi hangus'
   } else {
-    progBar.style.width = '0%'
-    progBar.style.background = ''
+    progBar.style.width = '0%'; progBar.style.background = ''
     progLabel.textContent = 'Belum diverifikasi'
   }
 
-  // Tombol aksi
+  // Tombol aksi — tampilkan "Sudah Selesai" untuk misi aktif
   const actionEl = document.getElementById('md-action')
   if (isActive) {
-    actionEl.innerHTML = `<button class="btn btn-primary" style="width:100%;" onclick="selesaikanMisi(${q.id})">✅ Selesaikan Misi</button>`
+    actionEl.innerHTML = `
+      <button class="btn btn-primary" style="width:100%;" onclick="konfirmasiMisi()">
+        <i class="ti ti-circle-check"></i> Sudah Selesai
+      </button>`
   } else if (isClaimed) {
     actionEl.innerHTML = `<div style="text-align:center;font-size:13px;color:var(--gray-400);padding:8px;">🎉 Misi sudah diklaim!</div>`
   } else if (isHangus) {
@@ -812,25 +865,75 @@ function openQuestDetail(id) {
     actionEl.innerHTML = ''
   }
 
+  // Reset konfirmasi panel
+  _resetKonfirmasiPanel()
+
   openModal('modal-misi-detail')
 }
 
-async function selesaikanMisi(id) {
-  const btn = document.querySelector('#md-action .btn')
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Memverifikasi...' }
+function _resetKonfirmasiPanel() {
+  const panel = document.getElementById('md-konfirmasi')
+  const chk1 = document.getElementById('chk-konfirmasi-1')
+  const chk2 = document.getElementById('chk-konfirmasi-2')
+  const btnSubmit = document.getElementById('btn-konfirmasi-submit')
+  if (panel) panel.style.display = 'none'
+  if (chk1) { chk1.checked = false; chk1.onchange = null }
+  if (chk2) { chk2.checked = false; chk2.onchange = null }
+  if (btnSubmit) btnSubmit.disabled = true
+  // Pastikan actionEl selalu terlihat kembali setelah reset
+  const actionEl = document.getElementById('md-action')
+  if (actionEl) actionEl.style.display = ''
+}
+
+// Dipanggil saat klik "Sudah Selesai" — tampilkan panel konfirmasi
+function konfirmasiMisi() {
+  const panel = document.getElementById('md-konfirmasi')
+  if (!panel) return
+  panel.style.display = 'block'
+  // Scroll modal ke bawah supaya checklist terlihat
+  const modal = panel.closest('.modal')
+  if (modal) setTimeout(() => { modal.scrollTop = modal.scrollHeight }, 50)
+
+  // Gunakan onchange (bukan addEventListener) supaya tidak menumpuk listener
+  const chk1 = document.getElementById('chk-konfirmasi-1')
+  const chk2 = document.getElementById('chk-konfirmasi-2')
+  const btnSubmit = document.getElementById('btn-konfirmasi-submit')
+  function updateBtn() {
+    if (btnSubmit) btnSubmit.disabled = !(chk1?.checked && chk2?.checked)
+  }
+  if (chk1) chk1.onchange = updateBtn
+  if (chk2) chk2.onchange = updateBtn
+  // Sembunyikan tombol "Sudah Selesai" saat panel konfirmasi terbuka
+  const actionEl = document.getElementById('md-action')
+  if (actionEl) actionEl.style.display = 'none'
+}
+
+// Dipanggil saat klik "Batal" di panel konfirmasi
+function batalKonfirmasi() {
+  _resetKonfirmasiPanel()
+  const actionEl = document.getElementById('md-action')
+  if (actionEl) actionEl.style.display = ''
+}
+
+// Dipanggil saat klik "Verifikasi Sekarang" (setelah kedua checkbox dicentang)
+async function submitSelesaikanMisi() {
+  const id = _activeMisiId
+  if (!id) return
+
+  const btnSubmit = document.getElementById('btn-konfirmasi-submit')
+  if (btnSubmit) { btnSubmit.disabled = true; btnSubmit.innerHTML = '<i class="ti ti-loader"></i> Memverifikasi...' }
 
   const result = await apiPost(`/quests/${id}/selesaikan`, { user_id: 1 })
 
   if (result && result.success) {
-    // Update quest lokal
+    // Update lokal dulu supaya render cepat
     const q = questData.find(x => x.id === id)
     if (q) q.status = 'claimed'
 
-    // Reload SEMUA data supaya EXP, leaderboard, dan profil langsung update
-    await Promise.all([loadUser(), loadLeaderboard()])
+    // Reload semua data dari server (termasuk questData supaya state selalu sinkron)
+    await Promise.all([loadUser(), loadLeaderboard(), loadQuests()])
     renderAll()
 
-    // Tampilkan modal hasil
     document.getElementById('hasil-icon').textContent = result.data?.level_up ? '🏆' : '⭐'
     document.getElementById('hasil-title').textContent = result.data?.level_up
       ? `${result.data.level_badge} Level Up ke ${result.data.level_title}!`
@@ -859,6 +962,12 @@ async function selesaikanMisi(id) {
     closeModal('modal-misi-detail')
     openModal('modal-hasil-verifikasi')
   }
+}
+
+async function selesaikanMisi(id) {
+  // Legacy — redirect ke flow baru
+  _activeMisiId = id
+  konfirmasiMisi()
 }
 
 // ── LEADERBOARD PROFILE ──

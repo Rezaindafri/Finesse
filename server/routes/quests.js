@@ -5,58 +5,83 @@ import https from 'https'
 
 const router = Router()
 
+// ── Normalisasi quest_type dari AI (bisa free text) → key internal ──
+function normalizeQuestType(raw) {
+  if (!raw) return 'hemat_total'
+  const s = raw.toString().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // hapus aksen
+    .replace(/[^a-z0-9\s,]/g, '').trim()
+
+  // Mapping kata kunci → quest_type internal
+  if (/hemat.*(total|mingg|bulan)|total.*(hemat|belanja|pengeluaran)|disiplin/i.test(raw)) return 'hemat_total'
+  if (/harian|hari.ini|sehari|daily/i.test(raw)) return 'batas_harian'
+  if (/frekuensi|berapa.?kali|kali|batasi.*x|batas.*kali|x.kali|count/i.test(raw)) return 'batas_frekuensi'
+  if (/kategori|category|jenis|khusus/i.test(raw)) return 'batas_kategori'
+  // Fallback by keyword count
+  if (s.includes('hemat') || s.includes('total') || s.includes('minggu')) return 'hemat_total'
+  if (s.includes('hari') || s.includes('harian')) return 'batas_harian'
+  if (s.includes('frekuensi') || s.includes('kali')) return 'batas_frekuensi'
+  if (s.includes('kategori')) return 'batas_kategori'
+  return 'hemat_total' // default paling aman
+}
+
+// ── Normalisasi difficulty dari AI → key internal ──
+function normalizeDifficulty(raw) {
+  if (!raw) return 'medium'
+  const s = raw.toString().toLowerCase()
+  if (/mudah|easy|gampang|ringan|simple/i.test(s)) return 'easy'
+  if (/susah|hard|sulit|berat|difficult/i.test(s)) return 'hard'
+  return 'medium'
+}
+
 // ── HELPER: Verifikasi misi berdasarkan tipe ──
 async function verifikasiMisi(quest, userId) {
   const now = new Date()
   const today = now.toISOString().slice(0, 10)
 
-  // Gunakan start_date dari quest, fallback ke 30 hari ke belakang
   const startDate = quest.start_date || (() => {
-    const d = new Date(now)
-    d.setDate(d.getDate() - 30)
-    return d.toISOString().slice(0, 10)
+    const d = new Date(now); d.setDate(d.getDate() - 7); return d.toISOString().slice(0, 10)
   })()
+  const deadline = quest.deadline && quest.deadline >= startDate ? quest.deadline : today
+  const effectiveStart = startDate <= deadline ? startDate : deadline
 
-  // Deadline: gunakan quest.deadline, fallback ke hari ini
-  const deadline = quest.deadline || today
+  // Normalisasi quest_type dari DB kalau-kalau tersimpan dalam format lama/free text
+  const questType = normalizeQuestType(quest.quest_type)
+  console.log(`[verifikasi] quest #${quest.id} type="${quest.quest_type}" → normalized="${questType}"`)
 
-  switch (quest.quest_type) {
+  switch (questType) {
 
     // Tipe: hemat total — total pengeluaran di bawah target dalam periode
     case 'hemat_total': {
       const row = await db.get(
         `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
          WHERE user_id = ? AND date >= ? AND date <= ?`,
-        [userId, startDate, deadline]
+        [userId, effectiveStart, deadline]
       )
       const totalSpend = row?.total || 0
       const target = quest.target_amount || 0
-      // Lolos kalau: ada transaksi (user aktif) DAN total di bawah target
-      // Atau kalau total = 0 (tidak ada transaksi sama sekali = hemat sempurna)
       const lolos = totalSpend <= target
       return {
         lolos,
-        detail: `Total pengeluaran: Rp ${totalSpend.toLocaleString('id-ID')} dari target hemat Rp ${target.toLocaleString('id-ID')}`,
+        detail: `Total pengeluaran Rp ${totalSpend.toLocaleString('id-ID')} dari batas Rp ${target.toLocaleString('id-ID')} (${effectiveStart} s/d ${deadline})`,
         actual: totalSpend
       }
     }
 
-    // Tipe: batas harian — pengeluaran hari ini tidak melebihi target
+    // Tipe: batas harian — pengeluaran HARI INI tidak melebihi target
+    // (selalu cek hari ini, bukan hari deadline yang mungkin sudah lewat)
     case 'batas_harian': {
-      // Cek pengeluaran di tanggal deadline (bukan hanya "hari ini")
-      // sehingga misi bisa diklaim kapanpun selama kondisi terpenuhi
-      const checkDate = deadline <= today ? deadline : today
       const row = await db.get(
         `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
          WHERE user_id = ? AND date = ?`,
-        [userId, checkDate]
+        [userId, today]
       )
       const totalHari = row?.total || 0
       const target = quest.target_amount || 0
       const lolos = totalHari <= target
       return {
         lolos,
-        detail: `Pengeluaran pada ${checkDate}: Rp ${totalHari.toLocaleString('id-ID')} dari batas Rp ${target.toLocaleString('id-ID')}`,
+        detail: `Pengeluaran hari ini (${today}): Rp ${totalHari.toLocaleString('id-ID')} dari batas Rp ${target.toLocaleString('id-ID')}`,
         actual: totalHari
       }
     }
@@ -66,7 +91,7 @@ async function verifikasiMisi(quest, userId) {
       const row = await db.get(
         `SELECT COUNT(*) as jumlah FROM transactions
          WHERE user_id = ? AND category = ? AND date >= ? AND date <= ?`,
-        [userId, quest.target_category, startDate, deadline]
+        [userId, quest.target_category, effectiveStart, today]
       )
       const jumlah = row?.jumlah || 0
       const target = quest.target_count || 3
@@ -75,7 +100,7 @@ async function verifikasiMisi(quest, userId) {
       return {
         lolos,
         hangus,
-        detail: `Transaksi ${quest.target_category}: ${jumlah}x dari batas ${target}x`,
+        detail: `Transaksi ${quest.target_category}: ${jumlah}x dari batas ${target}x (sejak ${effectiveStart})`,
         actual: jumlah
       }
     }
@@ -85,20 +110,35 @@ async function verifikasiMisi(quest, userId) {
       const row = await db.get(
         `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
          WHERE user_id = ? AND category = ? AND date >= ? AND date <= ?`,
-        [userId, quest.target_category, startDate, deadline]
+        [userId, quest.target_category, effectiveStart, deadline]
       )
       const totalKat = row?.total || 0
       const target = quest.target_amount || 0
       const lolos = totalKat <= target
       return {
         lolos,
-        detail: `Total ${quest.target_category}: Rp ${totalKat.toLocaleString('id-ID')} dari batas Rp ${target.toLocaleString('id-ID')}`,
+        detail: `Total ${quest.target_category}: Rp ${totalKat.toLocaleString('id-ID')} dari batas Rp ${target.toLocaleString('id-ID')} (${effectiveStart} s/d ${deadline})`,
         actual: totalKat
       }
     }
 
-    default:
-      return { lolos: false, detail: 'Tipe misi tidak dikenal', actual: 0 }
+    // Fallback — tipe tidak dikenal, anggap hemat_total dari start s/d hari ini
+    default: {
+      console.warn(`[verifikasi] quest_type tidak dikenal: "${quest.quest_type}", fallback ke hemat_total`)
+      const row = await db.get(
+        `SELECT COALESCE(SUM(amount), 0) as total FROM transactions
+         WHERE user_id = ? AND date >= ? AND date <= ?`,
+        [userId, effectiveStart, today]
+      )
+      const totalSpend = row?.total || 0
+      const target = quest.target_amount || 999999999 // kalau target null, selalu lolos
+      const lolos = totalSpend <= target
+      return {
+        lolos,
+        detail: `Total pengeluaran Rp ${totalSpend.toLocaleString('id-ID')}${target < 999999999 ? ` dari batas Rp ${target.toLocaleString('id-ID')}` : ''} (${effectiveStart} s/d ${today})`,
+        actual: totalSpend
+      }
+    }
   }
 }
 
@@ -181,6 +221,48 @@ async function postFastAPI(path, payload) {
   return await requestFastAPIWithNode(url, body)
 }
 
+// ── Tentukan target_* dan deadline dari Node.js berdasarkan quest_type ──
+// AI hanya kasih: title, description, reason, quest_type, difficulty, exp_reward
+// Node.js yang tentukan angka targetnya berdasarkan data real user
+function buildTargetFromType(questType, transactions, user, now) {
+  const budget = user?.budget || 2000000
+  const today = now.toISOString().slice(0, 10)
+
+  // Deadline 7 hari ke depan untuk misi mingguan
+  const deadline7 = (() => {
+    const d = new Date(now); d.setDate(d.getDate() + 7); return d.toISOString().slice(0, 10)
+  })()
+
+  // Hitung rata-rata harian dari budget
+  const targetHarian = Math.round(budget / 30 / 1000) * 1000
+
+  // Kategori paling sering/boros dari transaksi
+  const topCategory = transactions.reduce((acc, t) => {
+    acc[t.category] = (acc[t.category] || 0) + t.amount; return acc
+  }, {})
+  const borosKategori = Object.entries(topCategory).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Makan & Minum'
+
+  // Total spent bulan ini
+  const thisMonth = now.toISOString().slice(0, 7)
+  const totalBulanIni = transactions
+    .filter(t => t.date && t.date.startsWith(thisMonth))
+    .reduce((sum, t) => sum + t.amount, 0)
+  const sisaBudget = Math.max(budget - totalBulanIni, 0)
+
+  switch (questType) {
+    case 'hemat_total':
+      return { target_amount: Math.min(sisaBudget, targetHarian * 5), target_category: null, target_count: null, deadline: deadline7 }
+    case 'batas_harian':
+      return { target_amount: targetHarian, target_category: null, target_count: null, deadline: today }
+    case 'batas_frekuensi':
+      return { target_amount: null, target_category: borosKategori, target_count: 3, deadline: deadline7 }
+    case 'batas_kategori':
+      return { target_amount: Math.round(targetHarian * 3 / 1000) * 1000, target_category: borosKategori, target_count: null, deadline: deadline7 }
+    default:
+      return { target_amount: targetHarian * 5, target_category: null, target_count: null, deadline: deadline7 }
+  }
+}
+
 async function generateMisiDariFastAPI(userId, transactions, user) {
   const now = new Date()
   const defaultDate = now.toISOString().slice(0, 10)
@@ -202,27 +284,31 @@ async function generateMisiDariFastAPI(userId, transactions, user) {
   try {
     const data = await postFastAPI('/generate-missions', payload)
     const payloadData = data?.data ?? data
-    if (Array.isArray(payloadData?.dynamic_missions)) {
-      return payloadData.dynamic_missions.map(m => ({
-        title: m.title || m.judul || m.name || `Misi ${m.kesulitan || 'AI'}`,
+
+    // Ambil list misi dari berbagai kemungkinan struktur response
+    let rawMissions = []
+    if (Array.isArray(payloadData?.dynamic_missions)) rawMissions = payloadData.dynamic_missions
+    else if (Array.isArray(payloadData?.quests)) rawMissions = payloadData.quests
+    else if (Array.isArray(data)) rawMissions = data
+
+    if (rawMissions.length === 0) return []
+
+    // ── Hanya ambil 6 field dari AI, target_* ditentukan Node.js ──
+    return rawMissions.map(m => {
+      const questType = normalizeQuestType(m.quest_type || m.type || '')
+      const difficulty = normalizeDifficulty(m.kesulitan || m.difficulty || '')
+      const targets = buildTargetFromType(questType, transactions, user, now)
+      console.log(`[generateMisi] AI quest_type="${m.quest_type}" → "${questType}", difficulty="${m.difficulty||m.kesulitan}" → "${difficulty}"`)
+      return {
+        title:       m.title || m.judul || m.name || 'Misi Baru',
         description: m.description || m.deskripsi || m.desc || '',
-        reason: m.reason || m.alasan || 'Misi ini dibuat berdasarkan pola transaksimu.',
-        quest_type: m.quest_type || m.type || 'hemat_total',
-        target_amount: m.target_amount || m.target || null,
-        target_category: m.target_category || m.category || null,
-        target_count: m.target_count || m.count || null,
-        deadline: m.deadline || m.due_date || new Date().toISOString().slice(0, 10),
-        difficulty: (m.kesulitan || m.difficulty || 'medium').toLowerCase(),
-        exp_reward: m.exp_reward || m.exp_earned || 100
-      }))
-    }
-    if (Array.isArray(payloadData?.quests)) {
-      return payloadData.quests
-    }
-    if (Array.isArray(data)) {
-      return data
-    }
-    return []
+        reason:      m.reason || m.alasan || 'Misi ini dibuat berdasarkan pola transaksimu.',
+        quest_type:  questType,
+        difficulty,
+        exp_reward:  parseInt(m.exp_reward || m.exp_earned || 100),
+        ...targets
+      }
+    })
   } catch (err) {
     console.warn('[generateMisi] FastAPI tidak aktif, pakai mock:', err.message)
 
@@ -367,12 +453,12 @@ router.post('/generate', async (req, res) => {
           1,
           misi.exp_reward || 100,
           'active',
-          misi.quest_type || 'hemat_total',
+          normalizeQuestType(misi.quest_type || 'hemat_total'),
           misi.target_amount || null,
           misi.target_category || null,
           misi.target_count || null,
           misi.deadline || today,
-          misi.difficulty || 'medium',
+          normalizeDifficulty(misi.difficulty || 'medium'),
           startDate
         ]
       )
@@ -397,7 +483,6 @@ router.post('/generate', async (req, res) => {
 
 // ── POST /api/quests/:id/selesaikan — verifikasi + klaim misi ──
 router.post('/:id/selesaikan', async (req, res) => {
-  // user_id bisa dari body atau query param sebagai fallback
   const user_id = parseInt(req.body?.user_id || req.query?.user_id || 1)
   const questId = parseInt(req.params.id)
 
@@ -406,6 +491,19 @@ router.post('/:id/selesaikan', async (req, res) => {
     if (!quest) return res.status(404).json({ success: false, message: 'Misi tidak ditemukan' })
     if (quest.status === 'claimed') return res.status(400).json({ success: false, message: 'Misi sudah diklaim sebelumnya!' })
     if (quest.status === 'hangus') return res.status(400).json({ success: false, message: 'Misi ini sudah hangus.' })
+
+    // Normalisasi quest_type kalau masih free text (dari AI lama)
+    const normalizedType = normalizeQuestType(quest.quest_type)
+    const normalizedDiff = normalizeDifficulty(quest.difficulty)
+    if (normalizedType !== quest.quest_type || normalizedDiff !== quest.difficulty) {
+      await db.run(
+        'UPDATE quests SET quest_type = ?, difficulty = ? WHERE id = ?',
+        [normalizedType, normalizedDiff, questId]
+      )
+      quest.quest_type = normalizedType
+      quest.difficulty = normalizedDiff
+      console.log(`[selesaikan] Normalized quest #${questId}: type="${normalizedType}", diff="${normalizedDiff}"`)
+    }
 
     // Verifikasi kondisi misi
     const hasil = await verifikasiMisi(quest, user_id)

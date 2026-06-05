@@ -477,11 +477,6 @@
     <!-- Deskripsi -->
     <div style="font-size:13px;color:var(--gray-600);margin-bottom:12px;line-height:1.6;" id="md-desc"></div>
 
-    <!-- Target info -->
-    <div id="md-target-info" style="background:var(--gray-50);border-radius:var(--radius-sm);padding:12px;margin-bottom:14px;font-size:12px;color:var(--gray-600);"></div>
-
-    <!-- Deadline -->
-    <div style="font-size:12px;color:var(--gray-400);margin-bottom:14px;" id="md-deadline"></div>
 
     <!-- Progress bar -->
     <div class="progress-bar" style="height:10px;margin-bottom:6px;"><div class="progress-fill" id="md-progress" style="width:0%;"></div></div>
@@ -492,6 +487,27 @@
 
     <!-- Tombol aksi -->
     <div id="md-action"></div>
+
+    <!-- Konfirmasi checklist (muncul setelah klik "Sudah Selesai") -->
+    <div id="md-konfirmasi" style="display:none;margin-top:14px;background:var(--gray-50);border-radius:var(--radius-sm);border:1px solid var(--gray-200);padding:14px;">
+      <div style="font-size:13px;font-weight:600;color:var(--gray-700);margin-bottom:12px;">✅ Konfirmasi Penyelesaian</div>
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:10px;">
+        <input type="checkbox" id="chk-konfirmasi-1" style="margin-top:2px;width:16px;height:16px;accent-color:var(--brand);flex-shrink:0;">
+        <span style="font-size:12px;color:var(--gray-600);line-height:1.5;">Saya sudah menyelesaikan misi ini sesuai ketentuan yang diberikan.</span>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:14px;">
+        <input type="checkbox" id="chk-konfirmasi-2" style="margin-top:2px;width:16px;height:16px;accent-color:var(--brand);flex-shrink:0;">
+        <span style="font-size:12px;color:var(--gray-600);line-height:1.5;">Saya mengerti bahwa sistem akan memverifikasi transaksi saya secara otomatis.</span>
+      </label>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" id="btn-konfirmasi-submit" style="flex:1;font-size:13px;" onclick="submitSelesaikanMisi()" disabled>
+          <i class="ti ti-check"></i> Verifikasi Sekarang
+        </button>
+        <button class="btn btn-outline" style="flex:1;font-size:13px;" onclick="batalKonfirmasi()">
+          Batal
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -502,7 +518,7 @@
     <div style="font-size:18px;font-weight:700;margin-bottom:8px;" id="hasil-title">Misi Selesai!</div>
     <div style="font-size:13px;color:var(--gray-600);margin-bottom:16px;line-height:1.6;" id="hasil-detail"></div>
     <div style="font-size:28px;font-weight:800;color:var(--brand);margin-bottom:20px;" id="hasil-exp"></div>
-    <button class="btn btn-primary" style="width:100%;" onclick="closeModal('modal-hasil-verifikasi');closeModal('modal-misi-detail');loadQuests().then(renderQuestFull)">Lanjutkan</button>
+    <button class="btn btn-primary" style="width:100%;" onclick="closeModal('modal-hasil-verifikasi');closeModal('modal-misi-detail')">Lanjutkan</button>
   </div>
 </div>
 

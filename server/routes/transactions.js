@@ -337,7 +337,13 @@ router.post('/', async (req, res) => {
       : null
 
     if (ligaBaru) {
+      // Update liga di tabel users
       await db.run('UPDATE users SET liga = ? WHERE id = ?', [ligaBaru.id, user_id])
+      // Sync liga ke leaderboard bulan ini juga — supaya halaman Arena langsung reflect
+      await db.run(
+        'UPDATE leaderboard SET liga = ? WHERE user_id = ? AND month = ?',
+        [ligaBaru.id, user_id, month]
+      )
       console.log(`[Liga Update] User ${user_id} → ${ligaBaru.label}`)
     }
 
