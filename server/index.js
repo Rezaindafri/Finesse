@@ -39,8 +39,9 @@ app.get('/api/health', (req, res) => {
       'GET  /api/xp/summary',
       'GET  /api/xp/levels',
       'GET  /api/users/leaderboard/monthly',
-      'POST /api/quests',
-      'POST /api/quests/:id/claim'
+      'GET  /api/quests',
+      'POST /api/quests/generate',
+      'POST /api/quests/:id/selesaikan'
     ]
   })
 })

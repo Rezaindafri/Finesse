@@ -1,5 +1,7 @@
 import { Router } from 'express'
 import db from '../database.js'
+import http from 'http'
+import https from 'https'
 
 const router = Router()
 
@@ -110,53 +112,120 @@ async function buildDLFeatures(userId, amount, category, paymentMethod, date, bu
   }
 }
 
-// ── HELPER: Panggil FastAPI DL untuk prediksi EXP ──
-async function predictEXP(dlFeatures) {
-  const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000'
-  try {
-    const res = await fetch(`${FASTAPI_URL}/predict_exp`, {
+const FASTAPI_URL = process.env.FASTAPI_URL || 'https://samuelgautama-finesse-ai-api.hf.space'
+const FASTAPI_TIMEOUT_MS = 15000
+
+function requestFastAPIWithNode(url, body) {
+  return new Promise((resolve, reject) => {
+    let req
+    const protocol = url.protocol === 'https:' ? https : http
+    const timeoutId = setTimeout(() => {
+      if (req) req.destroy(new Error('HTTP request timeout'))
+    }, FASTAPI_TIMEOUT_MS)
+
+    const options = {
+      protocol: url.protocol,
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname + url.search,
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(dlFeatures),  // { features: {...} }
-      signal: AbortSignal.timeout(5000)  // timeout 5 detik
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }
+
+    req = protocol.request(options, res => {
+      let responseText = ''
+      res.on('data', chunk => responseText += chunk)
+      res.on('end', () => {
+        clearTimeout(timeoutId)
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`HTTP ${res.statusCode}: ${responseText}`))
+        }
+        try {
+          resolve(JSON.parse(responseText))
+        } catch (parseErr) {
+          reject(parseErr)
+        }
+      })
     })
-    if (!res.ok) throw new Error(`FastAPI responded ${res.status}`)
-    const data = await res.json()
+
+    req.on('error', err => {
+      clearTimeout(timeoutId)
+      reject(err)
+    })
+
+    req.write(body)
+    req.end()
+  })
+}
+
+async function postFastAPI(path, payload) {
+  const body = JSON.stringify(payload)
+  const url = new URL(`${FASTAPI_URL}${path}`)
+
+  if (typeof fetch === 'function') {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), FASTAPI_TIMEOUT_MS)
+    try {
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal: controller.signal
+      })
+      clearTimeout(timeoutId)
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => '')
+        throw new Error(`FastAPI ${path} returned ${res.status} ${bodyText}`)
+      }
+      return await res.json()
+    } catch (err) {
+      clearTimeout(timeoutId)
+      console.warn(`[FastAPI] fetch failed for ${path}, falling back to node request (${url.protocol})`, err.message)
+    }
+  }
+
+  return await requestFastAPIWithNode(url, body)
+}
+
+async function predictEXP(dlFeatures) {
+  try {
+    const data = await postFastAPI('/calculate-exp', { features: dlFeatures.features })
+    const payload = data?.data ?? data
     return {
-      exp_awarded: data.exp_awarded ?? 10,
-      financial_health_score: data.financial_health_score ?? null
+      exp_awarded: payload?.exp_earned ?? payload?.exp_awarded ?? payload?.exp ?? 10,
+      financial_health_score: payload?.financial_health_score ?? null
     }
   } catch (err) {
-    console.warn('[predictEXP] FastAPI tidak aktif, pakai default:', err.message)
-    // Fallback sederhana berdasarkan budget_utilization_ratio
     const util = dlFeatures.features.budget_utilization_ratio || 0
     const fallbackExp = util <= 0.5 ? 20 : util <= 0.8 ? 15 : util <= 1.0 ? 10 : 5
     return { exp_awarded: fallbackExp, financial_health_score: null }
   }
 }
 
-// ── HELPER: Panggil FastAPI K-Means untuk prediksi liga ──
-async function predictLiga(userId, meta, budget) {
-  const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000'
+async function predictLiga(meta, budget) {
   try {
-    const res = await fetch(`${FASTAPI_URL}/predict_liga`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user_id: userId,
-        budget_utilization_ratio: meta.budget_utilization_ratio,
-        user_avg_transaction: meta.user_avg_transaction,
-        transaction_count: meta.transaction_count
-      }),
-      signal: AbortSignal.timeout(5000)
+    const data = await postFastAPI('/get-league', {
+      monthly_budget: budget,
+      total_spent: meta.cumulative_spend,
+      transaction_count: meta.transaction_count
     })
-    if (!res.ok) throw new Error(`FastAPI /predict_liga responded ${res.status}`)
-    const data = await res.json()
-    const cluster = data.cluster ?? 1
-    return CLUSTER_TO_LIGA[cluster] || CLUSTER_TO_LIGA[1]
+    const payload = data?.data ?? data
+    if (typeof payload?.cluster === 'number') {
+      return CLUSTER_TO_LIGA[payload.cluster] || CLUSTER_TO_LIGA[1]
+    }
+    const leagueName = (payload?.league || payload?.user_league || payload?.role || payload?.cluster || '').toString().toLowerCase()
+    const mapping = {
+      gold: CLUSTER_TO_LIGA[0],
+      silver: CLUSTER_TO_LIGA[1],
+      bronze: CLUSTER_TO_LIGA[2],
+      iron: CLUSTER_TO_LIGA[3]
+    }
+    return mapping[leagueName] || CLUSTER_TO_LIGA[1]
   } catch (err) {
-    console.warn('[predictLiga] FastAPI tidak aktif:', err.message)
-    return null  // null = tidak update liga sekarang
+    return null
   }
 }
 
@@ -264,7 +333,7 @@ router.post('/', async (req, res) => {
 
     // 8. Cek apakah perlu update liga (tiap 5 transaksi atau naik level)
     const ligaBaru = (_meta.transaction_count % 5 === 0 || newLevel.level > level_before)
-      ? await predictLiga(user_id, _meta, budget)
+      ? await predictLiga(_meta, budget)
       : null
 
     if (ligaBaru) {

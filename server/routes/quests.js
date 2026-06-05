@@ -1,5 +1,7 @@
 import { Router } from 'express'
 import db from '../database.js'
+import http from 'http'
+import https from 'https'
 
 const router = Router()
 
@@ -100,34 +102,139 @@ async function verifikasiMisi(quest, userId) {
   }
 }
 
-// ── MOCK FastAPI: generate misi (diganti real FastAPI nanti) ──
-async function generateMisiDariFastAPI(userId, transactions, user) {
-  const FASTAPI_URL = process.env.FASTAPI_URL || 'http://127.0.0.1:8000'
-  try {
-    const res = await fetch(`${FASTAPI_URL}/generate_quests`, {
+// ── FastAPI mission generator ──
+const FASTAPI_URL = process.env.FASTAPI_URL || 'https://samuelgautama-finesse-ai-api.hf.space'
+const FASTAPI_TIMEOUT_MS = 15000
+
+function requestFastAPIWithNode(url, body) {
+  return new Promise((resolve, reject) => {
+    let req
+    const protocol = url.protocol === 'https:' ? https : http
+    const timeoutId = setTimeout(() => {
+      if (req) req.destroy(new Error('HTTP request timeout'))
+    }, FASTAPI_TIMEOUT_MS)
+
+    const options = {
+      protocol: url.protocol,
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname + url.search,
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, transactions, user })
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body)
+      }
+    }
+
+    req = protocol.request(options, res => {
+      let responseText = ''
+      res.on('data', chunk => responseText += chunk)
+      res.on('end', () => {
+        clearTimeout(timeoutId)
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          return reject(new Error(`HTTP ${res.statusCode}: ${responseText}`))
+        }
+        try {
+          resolve(JSON.parse(responseText))
+        } catch (parseErr) {
+          reject(parseErr)
+        }
+      })
     })
-    if (!res.ok) throw new Error('FastAPI tidak merespons')
-    const data = await res.json()
-    return data.quests
+
+    req.on('error', err => {
+      clearTimeout(timeoutId)
+      reject(err)
+    })
+
+    req.write(body)
+    req.end()
+  })
+}
+
+async function postFastAPI(path, payload) {
+  const body = JSON.stringify(payload)
+  const url = new URL(`${FASTAPI_URL}${path}`)
+
+  if (typeof fetch === 'function') {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), FASTAPI_TIMEOUT_MS)
+    try {
+      const res = await fetch(url.toString(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        signal: controller.signal
+      })
+      clearTimeout(timeoutId)
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => '')
+        throw new Error(`FastAPI ${path} returned ${res.status} ${bodyText}`)
+      }
+      return await res.json()
+    } catch (err) {
+      clearTimeout(timeoutId)
+      console.warn(`[FastAPI] fetch failed for ${path}, falling back to node request (${url.protocol})`, err.message)
+    }
+  }
+
+  return await requestFastAPIWithNode(url, body)
+}
+
+async function generateMisiDariFastAPI(userId, transactions, user) {
+  const now = new Date()
+  const defaultDate = now.toISOString().slice(0, 10)
+  const lastTx = transactions[0] || { category: 'Lainnya', amount: 0, date: defaultDate, exp_earned: 0 }
+  const totalSpent = transactions.reduce((sum, tx) => sum + (tx.amount || 0), 0)
+  const isWeekend = [0, 6].includes(new Date(lastTx.date || defaultDate).getDay()) ? 1 : 0
+  const isMonthEnd = (new Date(lastTx.date || defaultDate).getDate() >= 25) ? 1 : 0
+  const remainingBudget = Math.max((user?.budget || 2000000) - totalSpent, 0)
+  const payload = {
+    kategori_aktif: lastTx.category || 'Lainnya',
+    amount: lastTx.amount || 0,
+    sisa_anggaran: remainingBudget,
+    is_weekend: isWeekend,
+    is_month_end: isMonthEnd,
+    exp_earned: lastTx.exp_earned || 0,
+    user_league: user?.liga || user?.league || 'Silver'
+  }
+
+  try {
+    const data = await postFastAPI('/generate-missions', payload)
+    const payloadData = data?.data ?? data
+    if (Array.isArray(payloadData?.dynamic_missions)) {
+      return payloadData.dynamic_missions.map(m => ({
+        title: m.title || m.judul || m.name || `Misi ${m.kesulitan || 'AI'}`,
+        description: m.description || m.deskripsi || m.desc || '',
+        reason: m.reason || m.alasan || 'Misi ini dibuat berdasarkan pola transaksimu.',
+        quest_type: m.quest_type || m.type || 'hemat_total',
+        target_amount: m.target_amount || m.target || null,
+        target_category: m.target_category || m.category || null,
+        target_count: m.target_count || m.count || null,
+        deadline: m.deadline || m.due_date || new Date().toISOString().slice(0, 10),
+        difficulty: (m.kesulitan || m.difficulty || 'medium').toLowerCase(),
+        exp_reward: m.exp_reward || m.exp_earned || 100
+      }))
+    }
+    if (Array.isArray(payloadData?.quests)) {
+      return payloadData.quests
+    }
+    if (Array.isArray(data)) {
+      return data
+    }
+    return []
   } catch (err) {
-    // ── MOCK RESPONSE (aktif kalau FastAPI belum tersedia) ──
     console.warn('[generateMisi] FastAPI tidak aktif, pakai mock:', err.message)
 
-    const now = new Date()
-    const today = now.toISOString().slice(0, 10)
     const weekEnd = new Date(now)
     weekEnd.setDate(now.getDate() + 7)
     const deadline7 = weekEnd.toISOString().slice(0, 10)
 
-    // Analisis sederhana dari transaksi
     const topCategory = transactions.reduce((acc, t) => {
       acc[t.category] = (acc[t.category] || 0) + t.amount
       return acc
     }, {})
-    const borosKategori = Object.entries(topCategory).sort((a,b) => b[1]-a[1])[0]?.[0] || 'Hiburan'
+    const borosKategori = Object.entries(topCategory).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Hiburan & Nongkrong'
     const budget = user?.budget || 2000000
     const targetHarian = Math.round(budget / 30 / 1000) * 1000
 
@@ -152,7 +259,7 @@ async function generateMisiDariFastAPI(userId, transactions, user) {
         target_amount: targetHarian,
         target_category: null,
         target_count: null,
-        deadline: today,
+        deadline: defaultDate,
         difficulty: 'easy',
         exp_reward: 150
       },
@@ -225,7 +332,7 @@ router.post('/generate', async (req, res) => {
 
     // Ambil data transaksi untuk dikirim ke FastAPI
     const transactions = await db.all(
-      `SELECT category, amount, date FROM transactions
+      `SELECT category, amount, date, exp_earned FROM transactions
        WHERE user_id = ? ORDER BY created_at DESC LIMIT 30`,
       [user_id]
     )
