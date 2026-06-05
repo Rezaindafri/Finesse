@@ -16,9 +16,10 @@ Setiap hari, pengguna bisa meminta misi keuangan yang dipersonalisasi oleh AI. M
 Cara Jalaninnya:
 1. clone/pull git
 2. install npm [npm install]
-3. pasang .env yang isinya [PORT=3000
-                            FASTAPI_URL=https://samuelgautama-finesse-ai-api.hf.space]
-4. Masuk ke terminal dengan Path /Finesse kita
-5. jalankan [node server/index.js]
-6. Jalankan [npx vite page/]
-7. klik link atau copy link server ke chrome
+3. pasang .env yang isinya
+   [PORT=3000
+   FASTAPI_URL=https://samuelgautama-finesse-ai-api.hf.space]
+6. Masuk ke terminal dengan Path /Finesse kita
+7. jalankan [node server/index.js]
+8. Jalankan [npx vite page/]
+9. klik link atau copy link server ke chrome
